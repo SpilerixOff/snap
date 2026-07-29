@@ -753,6 +753,17 @@ client.on('interactionCreate', async interaction => {
             .addFields(
                 { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '​', inline: false },
                 {
+                    name: '🆓 Gratuit — 0€',
+                    value: [
+                        '> ✅ Commandes `/abonnement` `/forfaits`',
+                        '> ⚠️ **5 demandes de numéro/jour** max',
+                        '> ❌ Aucune stat ni historique',
+                        '> ❌ Pas de contrôle du bot',
+                        '> ❌ Pas de notifications',
+                    ].join('\n'),
+                    inline: true
+                },
+                {
                     name: '🤖 Accès Bot — 3€/mois',
                     value: [
                         '> ✅ Bot actif dans ton serveur',
