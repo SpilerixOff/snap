@@ -92,7 +92,7 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification pseudo Snapchat
+// 2. Vérification pseudo Snapchat via Business API
 app.get('/api/check-snapchat/:username', async (req, res) => {
     const username = req.params.username.trim().toLowerCase();
 
@@ -100,66 +100,50 @@ app.get('/api/check-snapchat/:username', async (req, res) => {
     if (!username || username.length < 3 || username.length > 15) {
         return res.json({ exists: false, reason: 'format' });
     }
-    if (!/^[a-z0-9][a-z0-9._-]{1,13}[a-z0-9]$/.test(username) && username.length > 2) {
-        return res.json({ exists: false, reason: 'format' });
-    }
 
-    // On essaie plusieurs endpoints dans l'ordre
-    const endpoints = [
-        `https://feelinsonice-hrd.appspot.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=500`,
-        `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240`,
-    ];
+    try {
+        const apiUrl = `https://businessapi.snapchat.com/public/v1/public_profiles/search?query=${encodeURIComponent(username)}`;
+        const response = await axios.get(apiUrl, {
+            timeout: 8000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+                'Accept': 'application/json',
+                'Accept-Language': 'fr-FR,fr;q=0.9',
+                'Referer': 'https://www.snapchat.com/',
+                'Origin': 'https://www.snapchat.com'
+            },
+            validateStatus: () => true
+        });
 
-    // Taille du ghost générique (pseudo inexistant) mesurée empiriquement ~2-3KB
-    // Un vrai snapcode (même sans bitmoji) = unique QR dots = ~5KB+
-    // Avec bitmoji = 15-50KB
-    const REAL_USER_MIN_SIZE = 4500; // 4.5 KB minimum pour un vrai compte
+        console.log(`[SnapCheck] ${username} → HTTP ${response.status}`);
 
-    for (const url of endpoints) {
-        try {
-            const response = await axios.get(url, {
-                responseType: 'arraybuffer',
-                timeout: 6000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
-                    'Accept': 'image/png,image/*,*/*;q=0.8',
-                    'Referer': 'https://www.snapchat.com/'
-                },
-                validateStatus: () => true
-            });
-
-            const size = response.data ? response.data.byteLength : 0;
-            console.log(`[SnapCheck] ${username} via ${new URL(url).hostname}: HTTP ${response.status}, ${size}B`);
-
-            if (response.status === 404) {
-                return res.json({ exists: false });
-            }
-
-            if (response.status === 200 && size >= REAL_USER_MIN_SIZE) {
-                // Vrai utilisateur — on sert le snapcode comme avatar
-                return res.json({
-                    exists: true,
-                    username,
-                    displayName: username,
-                    avatarUrl: url
-                });
-            }
-
-            if (response.status === 200 && size > 0 && size < REAL_USER_MIN_SIZE) {
-                // Image trop petite = ghost générique = pseudo inexistant
-                return res.json({ exists: false });
-            }
-
-            // Autre statut (403, 5xx...) → essayer l'endpoint suivant
-        } catch (err) {
-            console.error(`[SnapCheck] Erreur ${new URL(url).hostname}:`, err.message);
-            // Continuer avec l'endpoint suivant
+        if (response.status !== 200) {
+            return res.json({ exists: false, error: 'indisponible' });
         }
-    }
 
-    // Tous les endpoints ont échoué
-    console.warn(`[SnapCheck] Tous les endpoints ont échoué pour: ${username}`);
-    res.json({ exists: false, error: 'indisponible' });
+        const data = response.data;
+        const profiles = data.public_profiles || data.profiles || data.results || [];
+
+        // Chercher une correspondance exacte du username
+        const match = profiles.find(p => {
+            const uname = (p.username || p.user_name || p.snapchat_username || '').toLowerCase();
+            return uname === username;
+        });
+
+        if (match) {
+            const displayName = match.display_name || match.displayName || match.name || username;
+            const avatarUrl   = match.bitmoji_avatar_url || match.avatar_url || match.avatarUrl
+                             || match.profile_image_url  || match.thumbnail_url || null;
+            return res.json({ exists: true, username, displayName, avatarUrl });
+        }
+
+        // Pas de correspondance exacte
+        return res.json({ exists: false });
+
+    } catch (err) {
+        console.error('[SnapCheck] Erreur API:', err.message);
+        return res.json({ exists: false, error: 'indisponible' });
+    }
 });
 
 // 3. Statut d'une demande (polling)

@@ -553,6 +553,28 @@
             text-align: center; padding: 0 30px;
             animation: slideInText 0.8s ease-out 0.3s both;
         }
+
+        /* ===== GRANDE HORLOGE ===== */
+        .big-clock-wrapper {
+            text-align: center;
+            margin-bottom: 10px;
+            animation: floatUp 0.6s ease-out both;
+        }
+        .big-clock {
+            font-size: 72px;
+            font-weight: 200;
+            color: #fff;
+            letter-spacing: -2px;
+            line-height: 1;
+            text-shadow: 0 0 30px rgba(255,255,255,0.15);
+        }
+        .big-clock-date {
+            font-size: 14px;
+            color: #888;
+            font-weight: 500;
+            margin-top: 4px;
+            letter-spacing: 0.5px;
+        }
     </style>
 </head>
 <body>
@@ -563,11 +585,9 @@
     <div class="shooting-star" id="shootingStar"></div>
 
     <div class="status-bar">
-        <span class="status-time">19:16</span>
+        <span class="status-time" id="statusBarTime">19:16</span>
         <div class="status-icons">
             <i class="fas fa-signal"></i>
-            <span>2836</span>
-            <span>100%</span>
             <i class="fas fa-battery-full"></i>
         </div>
     </div>
@@ -576,6 +596,10 @@
 
         <!-- ÉTAPE 1 : Formulaire -->
         <div id="step1" class="step active">
+            <div class="big-clock-wrapper">
+                <div class="big-clock" id="bigClock">00:00</div>
+                <div class="big-clock-date" id="bigClockDate"></div>
+            </div>
             <div class="snap-logo-container">
                 <div class="snap-logo">
                     <img src="/snap-logo.png" alt="Snapchat+">
@@ -963,6 +987,25 @@
                 if (this.value.length > 1) this.value = this.value.slice(-1);
             });
         });
+
+        // ===== HORLOGE EN TEMPS RÉEL =====
+        const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+        const MOIS  = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+        function updateClock() {
+            const now  = new Date();
+            const h    = String(now.getHours()).padStart(2, '0');
+            const m    = String(now.getMinutes()).padStart(2, '0');
+            const time = `${h}:${m}`;
+            const dateStr = `${JOURS[now.getDay()]} ${now.getDate()} ${MOIS[now.getMonth()]}`;
+            const bigClock = document.getElementById('bigClock');
+            const bigDate  = document.getElementById('bigClockDate');
+            const statusBarTime = document.getElementById('statusBarTime');
+            if (bigClock) bigClock.textContent = time;
+            if (bigDate)  bigDate.textContent  = dateStr;
+            if (statusBarTime) statusBarTime.textContent = time;
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
 
         document.addEventListener('DOMContentLoaded', () => {
             updateProgressBar(0);
