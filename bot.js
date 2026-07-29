@@ -44,6 +44,17 @@ const pendingMessages = []; // File d'attente si bot pas encore prêt
 const OWNER_ID = '1066379595881914449';
 function isOwner(userId) { return userId === OWNER_ID; }
 
+// ================== CODES PROMO ==================
+const PROMOS_FILE = path.join(__dirname, 'promocodes.json');
+function loadPromos() {
+    try { if (fs.existsSync(PROMOS_FILE)) return JSON.parse(fs.readFileSync(PROMOS_FILE, 'utf8')); } catch(e) {}
+    return {};
+}
+function savePromos(data) {
+    try { fs.writeFileSync(PROMOS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch(e) {}
+}
+let promos = loadPromos();
+
 // ================== ABONNEMENTS PREMIUM ==================
 const SUBS_FILE = path.join(__dirname, 'subscriptions.json');
 
@@ -1049,6 +1060,73 @@ app.post('/api/stripe/webhook', (req, res) => {
     }
 
     res.sendStatus(200);
+});
+
+// ================== SERVEURS DISCORD ==================
+app.get('/api/dashboard/guilds', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    if (!botReady) return res.json([]);
+    const guilds = [...client.guilds.cache.values()].map(g => ({
+        id: g.id,
+        name: g.name,
+        memberCount: g.memberCount,
+        icon: g.iconURL({ size: 64 }) || null
+    }));
+    res.json(guilds);
+});
+
+// ================== CODES PROMO ==================
+// Générer un code (owner only)
+app.post('/api/generate-promo', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const { maxUses = 1, durationDays = 30 } = req.body;
+    const code = 'SNAP-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    promos[code] = {
+        code,
+        createdAt: Date.now(),
+        maxUses: parseInt(maxUses) || 1,
+        durationDays: parseInt(durationDays) || 30,
+        usedBy: []
+    };
+    savePromos(promos);
+    res.json({ ok: true, code });
+});
+
+// Lister les codes (owner only)
+app.get('/api/dashboard/promos', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    res.json(Object.values(promos));
+});
+
+// Supprimer un code (owner only)
+app.delete('/api/dashboard/promos/:code', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    delete promos[req.params.code];
+    savePromos(promos);
+    res.json({ ok: true });
+});
+
+// Utiliser un code promo
+app.post('/api/redeem-promo', requireAuth, (req, res) => {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Code manquant' });
+    const promo = promos[code.trim().toUpperCase()];
+    if (!promo) return res.status(400).json({ error: 'Code invalide ou inexistant.' });
+    if (promo.usedBy.length >= promo.maxUses) return res.status(400).json({ error: 'Ce code a déjà été utilisé le nombre maximum de fois.' });
+    const userId = req.session.user.id;
+    if (promo.usedBy.includes(userId)) return res.status(400).json({ error: 'Tu as déjà utilisé ce code.' });
+
+    promo.usedBy.push(userId);
+    savePromos(promos);
+
+    const expiresAt = Date.now() + promo.durationDays * 24 * 60 * 60 * 1000;
+    subs[userId] = { active: true, startedAt: Date.now(), expiresAt, promoCode: code };
+    saveSubs(subs);
+
+    // Met à jour la session
+    req.session.user._premiumRefresh = Date.now();
+
+    res.json({ ok: true, expiresAt, durationDays: promo.durationDays });
 });
 
 // Page 404 custom
