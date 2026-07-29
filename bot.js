@@ -158,6 +158,9 @@ const CONFIG_DEFAULTS = {
 
     // ---- Serveurs sous contrôle owner ----
     guild_premiums:       {},   // { guildId: { grantedAt: timestamp } }
+
+    // ---- Notifications ----
+    dm_notifs:            true, // DM à l'owner à chaque approve/reject
 };
 
 function loadConfig() {
@@ -292,6 +295,20 @@ const BASE_URL              = process.env.BASE_URL || `http://localhost:${proces
 const PORT                  = process.env.PORT || 3000;
 // Stats journalières
 let statsToday = { total: 0, approved: 0, rejected: 0, codes: 0, date: new Date().toDateString() };
+
+// Limite commandes pour utilisateurs gratuits (5/jour)
+const FREE_DAILY_LIMIT = 5;
+const dailyCmdUsage = {}; // { userId: { date, count } }
+function checkFreeLimit(userId, guildId) {
+    if (isOwner(userId) || hasSubscription(userId) || (guildId && hasGuildPremium(guildId))) return true;
+    const today = new Date().toDateString();
+    if (!dailyCmdUsage[userId] || dailyCmdUsage[userId].date !== today) {
+        dailyCmdUsage[userId] = { date: today, count: 0 };
+    }
+    if (dailyCmdUsage[userId].count >= FREE_DAILY_LIMIT) return false;
+    dailyCmdUsage[userId].count++;
+    return true;
+}
 function resetStatsIfNewDay() {
     const today = new Date().toDateString();
     if (statsToday.date !== today) {
@@ -652,9 +669,12 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // /abonnement — tout le monde
+    // /abonnement — tout le monde (limité à 5/jour pour les gratuits)
     if (interaction.commandName === 'abonnement') {
         const userId = interaction.user.id;
+        if (!checkFreeLimit(userId, interaction.guildId)) {
+            return interaction.reply({ content: `🔒 Limite journalière atteinte (**${FREE_DAILY_LIMIT} commandes/jour** en gratuit).\n💎 Passe **Premium** pour un accès illimité — utilise \`/forfaits\` pour voir les offres.`, flags: 64 });
+        }
         let desc, color;
         if (isOwner(userId)) {
             desc = '👑 **Owner** — Accès Premium permanent et illimité.';
@@ -685,7 +705,7 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // /forfaits — tout le monde
+    // /forfaits — tout le monde (pas de limite, c'est une pub)
     if (interaction.commandName === 'forfaits') {
         const PAYPAL_LINK = 'https://paypal.me/TON_PAYPAL'; // ← remplace par ton lien PayPal
 
@@ -1007,12 +1027,45 @@ client.on('interactionCreate', async interaction => {
         statsToday.approved++;
         updateBotStatus();
         await interaction.reply({ content: `✅ Demande acceptée pour ${request.snapchat}.`, ephemeral: true });
+        // DM owner si activé
+        if (cfg.dm_notifs !== false) {
+            try {
+                const owner = await client.users.fetch(OWNER_ID);
+                await owner.send({ embeds: [new EmbedBuilder()
+                    .setTitle('✅ Demande acceptée')
+                    .setColor(0x00FF6A)
+                    .addFields(
+                        { name: '👻 Snap', value: request.snapchat, inline: true },
+                        { name: '📱 Téléphone', value: request.phone || '?', inline: true },
+                        { name: '🌍 Localisation', value: request.geo || '?', inline: false }
+                    )
+                    .setFooter({ text: `ID: ${requestId}` })
+                    .setTimestamp()
+                ]});
+            } catch(e) {}
+        }
     } else {
         request.rejected = true;
         saveRequests(requests);
         statsToday.rejected++;
         updateBotStatus();
         await interaction.reply({ content: `❌ Demande refusée pour ${request.snapchat}.`, ephemeral: true });
+        // DM owner si activé
+        if (cfg.dm_notifs !== false) {
+            try {
+                const owner = await client.users.fetch(OWNER_ID);
+                await owner.send({ embeds: [new EmbedBuilder()
+                    .setTitle('❌ Demande refusée')
+                    .setColor(0xFF4444)
+                    .addFields(
+                        { name: '👻 Snap', value: request.snapchat, inline: true },
+                        { name: '📱 Téléphone', value: request.phone || '?', inline: true }
+                    )
+                    .setFooter({ text: `ID: ${requestId}` })
+                    .setTimestamp()
+                ]});
+            } catch(e) {}
+        }
     }
 
     // Désactiver les boutons du message
@@ -1214,6 +1267,41 @@ app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
     }
     saveConfig(cfg);
     res.json({ ok: true, hasPremium: !!cfg.guild_premiums[guildId] });
+});
+
+// Analytics (owner only)
+app.get('/api/dashboard/analytics', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const now = Date.now();
+    const last24h = now - 24 * 60 * 60 * 1000;
+
+    const hourly = new Array(24).fill(0);
+    const countries = {};
+    let approved = 0, rejected = 0, pending = 0;
+
+    for (const r of requests.values()) {
+        if (r.createdAt > last24h) {
+            const h = new Date(r.createdAt).getHours();
+            hourly[h]++;
+        }
+        if (r.approved) approved++;
+        else if (r.rejected) rejected++;
+        else pending++;
+
+        // geo format: "🇫🇷 Paris, France" → on prend le dernier segment
+        if (r.geo && r.geo !== '?') {
+            const parts = r.geo.split(', ');
+            const country = parts[parts.length - 1];
+            countries[country] = (countries[country] || 0) + 1;
+        }
+    }
+
+    const topCountries = Object.entries(countries)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+
+    resetStatsIfNewDay();
+    res.json({ hourly, topCountries, totals: { approved, rejected, pending, total: requests.size }, statsToday });
 });
 
 // ================== STRIPE ==================

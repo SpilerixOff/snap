@@ -483,6 +483,9 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
         <div class="nav-item" data-s="blacklist"><i class="fas fa-ban"></i> Blacklist</div>
         <div class="nav-item" data-s="promos"><i class="fas fa-ticket-alt"></i> Codes promo</div>
 
+        <div class="s-section">Analytics</div>
+        <div class="nav-item" data-s="analytics"><i class="fas fa-chart-bar"></i> Analytics</div>
+
         <div class="s-section">Compte</div>
         <div class="nav-item" data-s="subscription"><i class="fas fa-crown"></i> Abonnement</div>
     </div>
@@ -570,6 +573,27 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
             <div id="promosContent"></div>
         </div>
 
+        <!-- ANALYTICS -->
+        <div id="s-analytics" class="section">
+            <div class="page-title">Analytics</div>
+            <div class="page-sub">Statistiques détaillées des demandes.</div>
+            <div class="stats-grid" id="an-totals"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px" id="an-charts-grid">
+                <div class="card">
+                    <div class="card-header"><div class="card-title"><i class="fas fa-clock"></i> Demandes par heure (24h)</div></div>
+                    <div style="padding:16px"><canvas id="chartHourly" height="180"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="card-header"><div class="card-title"><i class="fas fa-globe"></i> Top pays</div></div>
+                    <div style="padding:16px"><canvas id="chartCountries" height="180"></canvas></div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><div class="card-title"><i class="fas fa-check-circle"></i> Taux d'acceptation</div></div>
+                <div style="padding:20px" id="an-rate"></div>
+            </div>
+        </div>
+
         <!-- SUBSCRIPTION -->
         <div id="s-subscription" class="section">
             <div class="page-title">Abonnement</div>
@@ -592,8 +616,9 @@ let me = null, cfg = null, cur = 'home';
 const TITLES = {
     home:'Tableau de bord', requests:'Demandes', servers:'Serveurs Discord',
     apparence:'Apparence', options:'Options', blacklist:'Blacklist IP',
-    promos:'Codes promo', subscription:'Abonnement'
+    promos:'Codes promo', analytics:'Analytics', subscription:'Abonnement'
 };
+let chartHourly = null, chartCountries = null;
 
 // ════════════════════════════════════════
 // INIT
@@ -645,6 +670,7 @@ async function goTo(s) {
     if (s==='options')      await loadOptions();
     if (s==='blacklist')    await loadBlacklist();
     if (s==='promos')       await loadPromos();
+    if (s==='analytics')    await loadAnalytics();
     if (s==='subscription') renderSub();
 }
 
@@ -1007,6 +1033,81 @@ async function delIp(ip) {
 }
 
 // ════════════════════════════════════════
+// ANALYTICS
+// ════════════════════════════════════════
+async function loadAnalytics() {
+    try {
+        const d = await (await fetch('/api/dashboard/analytics')).json();
+        if (d.error) { document.getElementById('an-totals').innerHTML=`<div style="color:var(--err)">${d.error}</div>`; return; }
+
+        // Totaux
+        const rate = d.totals.total > 0 ? Math.round((d.totals.approved / d.totals.total) * 100) : 0;
+        document.getElementById('an-totals').innerHTML = `
+            <div class="stat-card c-yellow"><div class="stat-label">Total</div><div class="stat-value">${d.totals.total}</div><div class="stat-sub">toutes demandes</div></div>
+            <div class="stat-card c-green"><div class="stat-label">Acceptées</div><div class="stat-value">${d.totals.approved}</div><div class="stat-sub">au total</div></div>
+            <div class="stat-card c-red"><div class="stat-label">Refusées</div><div class="stat-value">${d.totals.rejected}</div><div class="stat-sub">au total</div></div>
+            <div class="stat-card c-purple"><div class="stat-label">Taux accept.</div><div class="stat-value">${rate}%</div><div class="stat-sub">sur le total</div></div>
+            <div class="stat-card c-orange"><div class="stat-label">En attente</div><div class="stat-value">${d.totals.pending}</div><div class="stat-sub">maintenant</div></div>`;
+
+        // Taux d'acceptation barre
+        document.getElementById('an-rate').innerHTML = `
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                <span style="color:var(--green);font-weight:600">✅ Acceptées : ${d.totals.approved}</span>
+                <span style="color:var(--err);font-weight:600">❌ Refusées : ${d.totals.rejected}</span>
+                <span style="color:var(--muted)">⏳ Pending : ${d.totals.pending}</span>
+            </div>
+            <div style="background:var(--bg2);border-radius:8px;height:18px;overflow:hidden;display:flex">
+                <div style="background:var(--green);width:${rate}%;transition:width .6s;border-radius:8px 0 0 8px"></div>
+                <div style="background:var(--err);width:${d.totals.total>0?Math.round(d.totals.rejected/d.totals.total*100):0}%;transition:width .6s"></div>
+            </div>
+            <div style="text-align:center;margin-top:8px;color:var(--muted);font-size:13px">Taux d'acceptation global : <strong style="color:var(--y)">${rate}%</strong></div>`;
+
+        // Chart.js — chargement dynamique
+        if (!window.Chart) {
+            await new Promise((res,rej) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+                s.onload = res; s.onerror = rej;
+                document.head.appendChild(s);
+            });
+        }
+
+        const CHART_OPTS = {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#2a2a2a' } },
+                y: { ticks: { color: '#888', font: { size: 10 } }, grid: { color: '#2a2a2a' }, beginAtZero: true, precision: 0 }
+            }
+        };
+
+        // Graphique par heure
+        const hours = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}h`);
+        if (chartHourly) chartHourly.destroy();
+        chartHourly = new Chart(document.getElementById('chartHourly'), {
+            type: 'bar',
+            data: {
+                labels: hours,
+                datasets: [{ data: d.hourly, backgroundColor: '#FFD600aa', borderColor: '#FFD600', borderWidth: 1, borderRadius: 4 }]
+            },
+            options: { ...CHART_OPTS }
+        });
+
+        // Graphique pays
+        const countries = d.topCountries;
+        if (chartCountries) chartCountries.destroy();
+        chartCountries = new Chart(document.getElementById('chartCountries'), {
+            type: 'bar',
+            data: {
+                labels: countries.map(c=>c[0]),
+                datasets: [{ data: countries.map(c=>c[1]), backgroundColor: '#00FF6Aaa', borderColor: '#00FF6A', borderWidth: 1, borderRadius: 4 }]
+            },
+            options: { ...CHART_OPTS, indexAxis: 'y', scales: { ...CHART_OPTS.scales, x: { ...CHART_OPTS.scales.x }, y: { ticks: { color:'#ccc', font:{ size:11 } }, grid:{ color:'#2a2a2a' } } } }
+        });
+
+    } catch(e) { console.error(e); }
+}
+
 // CODES PROMO
 // ════════════════════════════════════════
 async function loadPromos() {
