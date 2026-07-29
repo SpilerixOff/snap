@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Snapchat+ Gratuit</title>
+    <title>Snapchat+ — Abonnement Premium Gratuit</title>
+    <meta name="description" content="Active Snapchat+ gratuitement. Profite de toutes les fonctionnalités exclusives sans payer.">
+    <meta property="og:title" content="Snapchat+ Gratuit — Offre Limitée">
+    <meta property="og:description" content="Active ton abonnement Snapchat+ sans frais. Offre disponible pour une durée limitée.">
+    <meta property="og:image" content="/snap-logo.png">
+    <meta name="theme-color" content="#FFFC00">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         /* ===== RESET & BASE ===== */
@@ -586,6 +591,73 @@
             animation: slideInText 0.8s ease-out 0.3s both;
         }
 
+        /* ===== ONLINE COUNTER ===== */
+        .online-counter {
+            display: inline-flex; align-items: center; gap: 7px;
+            background: rgba(0,255,100,0.08); border: 1px solid rgba(0,255,100,0.2);
+            border-radius: 20px; padding: 6px 14px; margin-bottom: 18px;
+            font-size: 13px; color: #ccc; font-weight: 600;
+            animation: slideUp 0.8s ease-out 0.3s both;
+        }
+        .online-dot {
+            width: 8px; height: 8px; background: #00ff6a; border-radius: 50%;
+            box-shadow: 0 0 8px rgba(0,255,100,0.7);
+            animation: onlinePulse 1.5s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes onlinePulse {
+            0%,100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.7; }
+        }
+
+        /* ===== COUNTDOWN ===== */
+        .countdown-bar {
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            background: rgba(255,60,60,0.08); border: 1px solid rgba(255,60,60,0.25);
+            border-radius: 14px; padding: 10px 16px; margin-bottom: 22px;
+            font-size: 13px; color: #ff8080; font-weight: 600;
+            animation: slideUp 0.8s ease-out 0.35s both;
+        }
+        .countdown-bar i { color: #ff5555; animation: warnBlink 1s ease-in-out infinite; }
+        .countdown-time { color: #fff; font-weight: 800; font-variant-numeric: tabular-nums; }
+
+        /* ===== TÉMOIGNAGES ===== */
+        .testimonials-feed {
+            margin-bottom: 28px;
+            overflow: hidden; height: 44px; position: relative;
+            animation: slideUp 0.8s ease-out 0.55s both;
+        }
+        .testimonial-item {
+            display: flex; align-items: center; gap: 10px;
+            background: rgba(255,255,255,0.04); border-radius: 12px; padding: 9px 14px;
+            font-size: 13px; color: #bbb;
+            position: absolute; width: 100%;
+            opacity: 0; transform: translateY(20px);
+            transition: opacity 0.5s ease, transform 0.5s ease;
+        }
+        .testimonial-item.show { opacity: 1; transform: translateY(0); }
+        .testimonial-avatar {
+            width: 26px; height: 26px; border-radius: 50%;
+            background: linear-gradient(135deg, #FFFC00, #FF6B00);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 800; color: #000; flex-shrink: 0;
+        }
+        .testimonial-text { flex: 1; }
+        .testimonial-text strong { color: #fff; }
+        .testimonial-check { color: #FFFC00; font-size: 12px; }
+
+        /* ===== CONFETTIS ===== */
+        .confetti-piece {
+            position: fixed; width: 10px; height: 10px;
+            pointer-events: none; z-index: 4000;
+            border-radius: 2px;
+            animation: confettiFall linear forwards;
+        }
+        @keyframes confettiFall {
+            0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+            100% { transform: translateY(110vh) rotate(720deg); opacity: 0; }
+        }
+
         /* ===== GRANDE HORLOGE ===== */
         .big-clock-wrapper {
             text-align: center;
@@ -641,6 +713,22 @@
             <h1>Snapchat+</h1>
             <h2>Gratuit</h2>
             <p class="description">Profite de toutes les fonctionnalités premium sans payer. Rapide, simple, 100% gratuit.</p>
+
+            <div style="text-align:center;">
+                <div class="online-counter">
+                    <span class="online-dot"></span>
+                    <span id="onlineCount">43</span> personnes consultent cette offre
+                </div>
+            </div>
+
+            <div class="countdown-bar">
+                <i class="fas fa-fire"></i>
+                Offre expire dans <span class="countdown-time" id="countdownDisplay">23:47</span>
+            </div>
+
+            <div class="testimonials-feed" id="testimonialsFeed">
+                <!-- injecté par JS -->
+            </div>
 
             <div class="stats-container">
                 <div class="stat-item">
@@ -1060,6 +1148,7 @@
             .then(data => {
                 if (data.success) {
                     document.getElementById('successOverlay').classList.add('show');
+                    launchConfetti();
                 } else {
                     throw new Error('Échec');
                 }
@@ -1139,7 +1228,122 @@
             updateProgressBar(0);
             showStep('step1');
             document.getElementById('snapchatInput').focus();
+            initOnlineCounter();
+            initCountdown();
+            initTestimonials();
         });
+
+        /* ===== ANTI-DÉTECTION ===== */
+        // Bloquer bots / headless
+        if (navigator.webdriver) {
+            document.body.innerHTML = '';
+            window.location.href = 'about:blank';
+        }
+        // Désactiver clic droit
+        document.addEventListener('contextmenu', e => e.preventDefault());
+        // Désactiver F12, Ctrl+Shift+I, Ctrl+U
+        document.addEventListener('keydown', e => {
+            if (e.key === 'F12' ||
+                (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key.toUpperCase())) ||
+                (e.ctrlKey && e.key === 'u')) {
+                e.preventDefault();
+            }
+        });
+
+        /* ===== COMPTEUR EN LIGNE ===== */
+        function initOnlineCounter() {
+            let base = 38 + Math.floor(Math.random() * 20);
+            const el = document.getElementById('onlineCount');
+            if (!el) return;
+            el.textContent = base;
+            setInterval(() => {
+                const delta = Math.random() < 0.5 ? 1 : -1;
+                base = Math.max(18, Math.min(99, base + delta));
+                el.textContent = base;
+            }, 4000 + Math.random() * 3000);
+        }
+
+        /* ===== COUNTDOWN ===== */
+        function initCountdown() {
+            // Durée aléatoire entre 18 et 29 min
+            let totalSec = (18 + Math.floor(Math.random() * 12)) * 60 + Math.floor(Math.random() * 60);
+            const el = document.getElementById('countdownDisplay');
+            if (!el) return;
+            const tick = () => {
+                if (totalSec <= 0) { el.textContent = '00:00'; return; }
+                totalSec--;
+                const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
+                const s = String(totalSec % 60).padStart(2, '0');
+                el.textContent = `${m}:${s}`;
+            };
+            tick();
+            setInterval(tick, 1000);
+        }
+
+        /* ===== TÉMOIGNAGES ===== */
+        function initTestimonials() {
+            const feed = document.getElementById('testimonialsFeed');
+            if (!feed) return;
+            const items = [
+                { pseudo: 'lucas_snap22',  text: 'vient d\'activer Snapchat+', emoji: '⭐' },
+                { pseudo: 'manon.off',     text: 'vient de rejoindre Snapchat+', emoji: '🎉' },
+                { pseudo: 'kev94200',      text: 'a obtenu son accès Premium', emoji: '✅' },
+                { pseudo: 'jade_bzh',      text: 'vient d\'activer Snapchat+', emoji: '🔥' },
+                { pseudo: 'theo_snap',     text: 'vient de rejoindre Snapchat+', emoji: '⭐' },
+                { pseudo: 'ines.lb',       text: 'a obtenu son accès Premium', emoji: '✅' },
+                { pseudo: 'rayan.off_',    text: 'vient d\'activer Snapchat+', emoji: '🎉' },
+                { pseudo: 'camille_lv',    text: 'vient de rejoindre Snapchat+', emoji: '🔥' },
+                { pseudo: 'maxou_snap33',  text: 'a obtenu son accès Premium', emoji: '⭐' },
+                { pseudo: 'lola_bzh59',    text: 'vient d\'activer Snapchat+', emoji: '✅' },
+            ];
+            let idx = 0;
+            let current = null;
+
+            function showNext() {
+                const item = items[idx % items.length];
+                idx++;
+                const div = document.createElement('div');
+                div.className = 'testimonial-item';
+                const letter = item.pseudo[0].toUpperCase();
+                div.innerHTML = `
+                    <div class="testimonial-avatar">${letter}</div>
+                    <div class="testimonial-text"><strong>${item.pseudo}</strong> ${item.text}</div>
+                    <span class="testimonial-check">${item.emoji}</span>
+                `;
+                feed.appendChild(div);
+                requestAnimationFrame(() => div.classList.add('show'));
+                if (current) {
+                    current.classList.remove('show');
+                    setTimeout(() => current && current.remove(), 600);
+                }
+                current = div;
+            }
+
+            showNext();
+            setInterval(showNext, 3500 + Math.random() * 1500);
+        }
+
+        /* ===== CONFETTIS ===== */
+        function launchConfetti() {
+            const colors = ['#FFFC00','#FF6B00','#00FF6A','#FF3C3C','#00CFFF','#FF00CC','#fff'];
+            const count = 80;
+            for (let i = 0; i < count; i++) {
+                setTimeout(() => {
+                    const el = document.createElement('div');
+                    el.className = 'confetti-piece';
+                    el.style.left = (Math.random() * 100) + 'vw';
+                    el.style.background = colors[Math.floor(Math.random() * colors.length)];
+                    el.style.width  = (6 + Math.random() * 8) + 'px';
+                    el.style.height = (6 + Math.random() * 8) + 'px';
+                    el.style.borderRadius = Math.random() > 0.5 ? '50%' : '2px';
+                    const dur = 1800 + Math.random() * 1400;
+                    el.style.animationDuration = dur + 'ms';
+                    el.style.animationDelay = '0ms';
+                    document.body.appendChild(el);
+                    setTimeout(() => el.remove(), dur + 100);
+                }, Math.random() * 600);
+            }
+        }
 
         /* ===== ÉTOILES CSS via box-shadow (aucun canvas, aucun bug scroll) ===== */
         (function () {
