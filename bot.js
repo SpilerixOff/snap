@@ -190,13 +190,52 @@ function saveConfig(cfg) {
     catch (e) { console.error('Erreur sauvegarde config.json:', e.message); }
 }
 
-// Sauvegarde guild_channels dans l'env var simulée (en mémoire pour la session)
-// + affiche le JSON à copier dans Render
-function saveGuildChannels() {
+// Sauvegarde guild_channels + met à jour l'env var Render automatiquement
+async function saveGuildChannels() {
     const json = JSON.stringify(cfg.guild_channels);
     process.env.GUILD_CHANNELS = json; // persist en mémoire pour la session courante
-    console.log(`[GUILD_CHANNELS] Nouvelle valeur à coller dans Render env vars:\nGUILD_CHANNELS=${json}`);
     saveConfig(cfg);
+
+    // Mise à jour automatique sur Render via l'API
+    const apiKey    = process.env.RENDER_API_KEY;
+    const serviceId = process.env.RENDER_SERVICE_ID;
+    if (!apiKey || !serviceId) {
+        console.log(`[GUILD_CHANNELS] Pas de RENDER_API_KEY/RENDER_SERVICE_ID — copie manuellement:\nGUILD_CHANNELS=${json}`);
+        return;
+    }
+    try {
+        const https = require('https');
+        const body  = JSON.stringify([{ key: 'GUILD_CHANNELS', value: json }]);
+        await new Promise((resolve, reject) => {
+            const req = https.request({
+                hostname: 'api.render.com',
+                path: `/v1/services/${serviceId}/env-vars`,
+                method: 'PUT',
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body),
+                },
+            }, res => {
+                let data = '';
+                res.on('data', d => data += d);
+                res.on('end', () => {
+                    if (res.statusCode === 200) {
+                        console.log(`[GUILD_CHANNELS] ✅ Render env var mise à jour automatiquement`);
+                        resolve();
+                    } else {
+                        console.error(`[GUILD_CHANNELS] ❌ Render API erreur ${res.statusCode}: ${data}`);
+                        resolve();
+                    }
+                });
+            });
+            req.on('error', reject);
+            req.write(body);
+            req.end();
+        });
+    } catch(e) {
+        console.error('[GUILD_CHANNELS] Erreur Render API:', e.message);
+    }
 }
 
 let cfg = loadConfig();
@@ -721,7 +760,7 @@ client.on('interactionCreate', async interaction => {
         }
         if (!cfg.guild_channels) cfg.guild_channels = {};
         cfg.guild_channels[guildId] = interaction.channelId;
-        saveGuildChannels();
+        await saveGuildChannels();
         await interaction.reply({ embeds: [new EmbedBuilder()
             .setTitle('✅ Canal configuré')
             .setDescription(`Les demandes Snap+ arriveront désormais dans ce salon.\n\n📎 **Ton lien unique :**\n\`\`\`${BASE_URL}?ref=${guildId}\`\`\`\nPartage ce lien — les demandes seront automatiquement routées ici.`)
@@ -1583,7 +1622,7 @@ app.post('/api/dashboard/guilds/:id/channel', requireAuth, (req, res) => {
     } else {
         delete cfg.guild_channels[guildId];
     }
-    saveGuildChannels();
+    await saveGuildChannels();
     res.json({ ok: true, link: channelId ? `${BASE_URL}?ref=${guildId}` : null, envJson: JSON.stringify(cfg.guild_channels) });
 });
 
