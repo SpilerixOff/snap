@@ -1612,7 +1612,7 @@ app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
 });
 
 // Set/get channel pour un guild (owner only via dashboard)
-app.post('/api/dashboard/guilds/:id/channel', requireAuth, (req, res) => {
+app.post('/api/dashboard/guilds/:id/channel', requireAuth, async (req, res) => {
     if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
     const guildId = req.params.id;
     const { channelId } = req.body;
