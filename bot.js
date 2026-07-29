@@ -3,7 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, REST, Routes, ActivityType, ComponentType } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, REST, Routes, ActivityType, ComponentType, PermissionFlagsBits } = require('discord.js');
 const { v4: uuidv4 } = require('uuid');
 const session = require('express-session');
 
@@ -872,6 +872,30 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    // /genpromo — OWNER ONLY
+    if (interaction.commandName === 'genpromo') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        const heures = interaction.options.getInteger('heures');
+        const maxUses = interaction.options.getInteger('utilisations') || 1;
+        const code = 'SNAP-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+        const durationMs = heures * 60 * 60 * 1000;
+        promos[code] = { code, createdAt: Date.now(), durationMs, maxUses, usedBy: [] };
+        savePromos(promos);
+        const expiresAt = Math.floor((Date.now() + durationMs) / 1000);
+        return interaction.reply({ embeds: [new EmbedBuilder()
+            .setTitle('🎟️ Code promo généré')
+            .setColor(0xFFFC00)
+            .addFields(
+                { name: '🔑 Code', value: `\`\`\`${code}\`\`\``, inline: false },
+                { name: '⏱️ Durée', value: `${heures}h`, inline: true },
+                { name: '👥 Utilisations', value: `${maxUses}`, inline: true },
+                { name: '⏰ Expire', value: `<t:${expiresAt}:F>`, inline: false }
+            )
+            .setFooter({ text: 'Snap+ • Code à usage limité' })
+            .setTimestamp()
+        ], ephemeral: true });
+    }
+
     // /setchannel — requiert premium sur le serveur OU owner
     if (interaction.commandName === 'setchannel') {
         const guildId = interaction.guildId;
@@ -891,6 +915,33 @@ client.on('interactionCreate', async interaction => {
             .setFooter({ text: 'Snap+ • Configuration réussie' })
             .setTimestamp()
         ], ephemeral: true });
+        return;
+    }
+
+    // /infodash — poste publiquement la présentation du dashboard
+    if (interaction.commandName === 'infodash') {
+        if (!isOwner(interaction.user.id) && !hasGuildPremium(interaction.guildId)) {
+            return interaction.reply({ content: '🔒 Réservé aux serveurs avec un abonnement actif.', ephemeral: true });
+        }
+        const guildId = interaction.guildId;
+        const refLink = guildId && cfg.guild_channels && cfg.guild_channels[guildId]
+            ? `${BASE_URL}?ref=${guildId}`
+            : BASE_URL;
+
+        await interaction.reply({ embeds: [
+            new EmbedBuilder()
+                .setTitle('📊 Dashboard de gestion — Snap+')
+                .setDescription('Accède au panneau de contrôle pour gérer les demandes, configurer le bot et suivre les statistiques en temps réel.')
+                .setColor(0xFFFC00)
+                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                .addFields(
+                    { name: '🔗 Lien du formulaire client', value: `[**Cliquer ici**](${refLink})\n\`${refLink}\``, inline: false },
+                    { name: '⚙️ Fonctionnalités', value: '• Voir et gérer toutes les demandes\n• Accepter / refuser en un clic\n• Statistiques en temps réel\n• Configuration complète du bot', inline: false },
+                    { name: '🚀 Comment ça marche ?', value: '1️⃣ Le client remplit le formulaire via le lien\n2️⃣ La demande arrive dans ce salon\n3️⃣ Tu cliques **Accepter** ou **Refuser**\n4️⃣ Le client reçoit la confirmation instantanément', inline: false }
+                )
+                .setFooter({ text: 'Snap+ Bot • Propulsé par Snap Activator' })
+                .setTimestamp()
+        ]});
         return;
     }
 
@@ -1968,7 +2019,7 @@ app.post('/api/redeem-promo', requireAuth, (req, res) => {
     promo.usedBy.push(userId);
     savePromos(promos);
 
-    const expiresAt = Date.now() + promo.durationDays * 24 * 60 * 60 * 1000;
+    const expiresAt = Date.now() + (promo.durationMs || promo.durationDays * 24 * 60 * 60 * 1000);
     subs[userId] = { active: true, startedAt: Date.now(), expiresAt, promoCode: code };
     saveSubs(subs);
 
@@ -2104,6 +2155,19 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('install')
                     .setDescription('🚀 Guide d\'installation — ajouter le bot sur un nouveau serveur')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('genpromo')
+                    .setDescription('🎟️ Générer un code promo [OWNER ONLY]')
+                    .addIntegerOption(o => o.setName('heures').setDescription('Durée en heures (ex: 24)').setRequired(true).setMinValue(1).setMaxValue(8760))
+                    .addIntegerOption(o => o.setName('utilisations').setDescription('Nombre max d\'utilisations (défaut: 1)').setRequired(false).setMinValue(1))
+                    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('infodash')
+                    .setDescription('📊 Présenter le dashboard de gestion dans ce salon')
                     .toJSON(),
 
                 new SlashCommandBuilder()
