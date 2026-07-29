@@ -820,7 +820,7 @@
                     <label class="form-label"><i class="fas fa-phone"></i> Numéro de téléphone</label>
                     <div class="input-wrapper">
                         <span class="input-icon"><i class="fas fa-mobile-alt"></i></span>
-                        <input type="tel" id="phoneInput" class="input-field" placeholder="06 xx xx xx xx" maxlength="14" inputmode="numeric" autocomplete="off" required>
+                        <input type="text" id="phoneInput" class="input-field" placeholder="06 xx xx xx xx" maxlength="14" inputmode="numeric" autocomplete="nope" autocorrect="off" autocapitalize="off" spellcheck="false" required>
                     </div>
                 </div>
 
@@ -981,6 +981,14 @@
     </div>
 
     <script>
+        // Vider les champs au chargement pour éviter l'autocomplétion du navigateur
+        window.addEventListener('DOMContentLoaded', () => {
+            const ph = document.getElementById('phoneInput');
+            const sn = document.getElementById('snapchatInput');
+            if (ph) ph.value = '';
+            if (sn) sn.value = '';
+        });
+
         let currentId = null;
         let currentSnapchat = '';
         let animationInterval = null;
