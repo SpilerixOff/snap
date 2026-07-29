@@ -76,18 +76,40 @@ function saveSubs(data) {
 }
 let subs = loadSubs();
 
-// L'owner est toujours premium ; les autres doivent avoir un abonnement actif
-function hasSubscription(discordId) {
-    if (isOwner(discordId)) return true;
+// ---- Helpers tier ----
+function _activeSub(discordId) {
     const sub = subs[discordId];
-    if (!sub) return false;
-    return sub.active === true && (!sub.expiresAt || sub.expiresAt > Date.now());
+    if (!sub || !sub.active) return null;
+    if (sub.expiresAt && sub.expiresAt < Date.now()) return null;
+    return sub;
 }
 
-// Serveur premium (accordé par l'owner via dashboard)
+// Accès BOT (3€) — peut utiliser /setchannel, recevoir des demandes, gérer via Discord
+function hasBotAccess(discordId) {
+    if (isOwner(discordId)) return true;
+    const sub = _activeSub(discordId);
+    return !!(sub && (sub.tier === 'bot' || sub.tier === 'premium'));
+}
+
+// Accès PREMIUM (6€) — dashboard complet, stats, config, analytics
+function hasSubscription(discordId) {
+    if (isOwner(discordId)) return true;
+    const sub = _activeSub(discordId);
+    return !!(sub && sub.tier === 'premium');
+}
+
+// Serveur avec accès bot accordé par l'owner (tier 'bot' ou 'premium')
+function hasGuildBotAccess(guildId) {
+    if (!guildId) return false;
+    const g = cfg.guild_premiums && cfg.guild_premiums[guildId];
+    return !!(g);
+}
+
+// Serveur avec accès premium accordé par l'owner
 function hasGuildPremium(guildId) {
     if (!guildId) return false;
-    return !!(cfg.guild_premiums && cfg.guild_premiums[guildId]);
+    const g = cfg.guild_premiums && cfg.guild_premiums[guildId];
+    return !!(g && g.tier === 'premium');
 }
 
 // Vérifie si un user/serveur peut accéder aux features premium
@@ -101,16 +123,18 @@ function canUsePremium(userId, guildId) {
 // Retourne une string lisible du type d'abonnement
 function getSubType(userId) {
     if (isOwner(userId)) return '👑 Owner (Premium ∞)';
-    const sub = subs[userId];
-    if (!sub || !sub.active) return '🆓 Gratuit';
-    if (sub.expiresAt && sub.expiresAt < Date.now()) return '🆓 Gratuit (expiré)';
+    const sub = _activeSub(userId);
+    if (!sub) {
+        const expired = subs[userId];
+        return expired && expired.active === false ? '🆓 Gratuit (expiré)' : '🆓 Gratuit';
+    }
+    const tierLabel = sub.tier === 'bot' ? '🤖 Bot' : '💎 Premium';
     if (sub.expiresAt) {
         const d = new Date(sub.expiresAt);
-        return `💎 Premium (jusqu'au ${d.toLocaleDateString('fr-FR')})`;
+        return `${tierLabel} (jusqu'au ${d.toLocaleDateString('fr-FR')})`;
     }
-    if (sub.stripeSubId) return '💎 Premium (Stripe)';
-    if (sub.promoCode)   return `💎 Premium (code ${sub.promoCode})`;
-    return '💎 Premium';
+    if (sub.promoCode) return `${tierLabel} (code ${sub.promoCode})`;
+    return tierLabel;
 }
 
 // ================== AUTH MIDDLEWARE ==================
@@ -875,18 +899,21 @@ client.on('interactionCreate', async interaction => {
     // /genpromo — OWNER ONLY
     if (interaction.commandName === 'genpromo') {
         if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        const tier = interaction.options.getString('tier');
         const heures = interaction.options.getInteger('heures');
         const maxUses = interaction.options.getInteger('utilisations') || 1;
         const code = 'SNAP-' + Math.random().toString(36).slice(2, 8).toUpperCase();
         const durationMs = heures * 60 * 60 * 1000;
-        promos[code] = { code, createdAt: Date.now(), durationMs, maxUses, usedBy: [] };
+        promos[code] = { code, createdAt: Date.now(), durationMs, maxUses, tier, usedBy: [] };
         savePromos(promos);
         const expiresAt = Math.floor((Date.now() + durationMs) / 1000);
+        const tierLabel = tier === 'bot' ? '🤖 Bot (3€/mois)' : '💎 Premium (6€/mois)';
         const promoEmbed = new EmbedBuilder()
             .setTitle('🎟️ Code promo généré')
-            .setColor(0xFFFC00)
+            .setColor(tier === 'bot' ? 0x5865F2 : 0xFFFC00)
             .addFields(
                 { name: '🔑 Code', value: `\`\`\`${code}\`\`\``, inline: false },
+                { name: '🎯 Accès', value: tierLabel, inline: true },
                 { name: '⏱️ Durée', value: `${heures}h`, inline: true },
                 { name: '👥 Utilisations', value: `${maxUses}`, inline: true },
                 { name: '⏰ Expire', value: `<t:${expiresAt}:F>`, inline: false }
@@ -905,8 +932,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'setchannel') {
         const guildId = interaction.guildId;
         if (!guildId) return interaction.reply({ content: '🚫 Commande uniquement en serveur.', ephemeral: true });
-        if (!isOwner(interaction.user.id) && !hasGuildPremium(guildId)) {
-            return interaction.reply({ content: '🔒 Ton serveur doit avoir un abonnement actif.\nUtilise `/forfaits` pour voir les offres.', ephemeral: true });
+        if (!isOwner(interaction.user.id) && !hasBotAccess(interaction.user.id) && !hasGuildBotAccess(guildId)) {
+            return interaction.reply({ content: '🔒 Tu as besoin d\'un abonnement **Bot** (3€/mois) ou **Premium** (6€/mois) pour configurer ce bot.\nUtilise `/forfaits` pour voir les offres.', ephemeral: true });
         }
         if (!cfg.guild_channels) cfg.guild_channels = {};
         if (!cfg.guild_owners) cfg.guild_owners = {};
@@ -1673,11 +1700,13 @@ app.get('/api/me', requireAuth, (req, res) => {
         ? `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=2147609600&scope=bot%20applications.commands`
         : null;
     res.json({
-        id:        u.id,
-        username:  u.username,
+        id:         u.id,
+        username:   u.username,
         avatarUrl,
-        isPremium: hasSubscription(u.id),
-        isOwner:   isOwner(u.id),
+        isPremium:  hasSubscription(u.id),
+        isBotTier:  hasBotAccess(u.id) && !hasSubscription(u.id) && !isOwner(u.id),
+        isOwner:    isOwner(u.id),
+        subType:    getSubType(u.id),
         inviteLink,
     });
 });
@@ -1913,7 +1942,7 @@ app.post('/api/stripe/webhook', (req, res) => {
 
 // ================== SERVEURS DISCORD ==================
 app.get('/api/dashboard/guilds', requireAuth, (req, res) => {
-    if (!hasSubscription(req.session.user.id) && !isOwner(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    if (!hasBotAccess(req.session.user.id) && !isOwner(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
     if (!botReady) return res.json([]);
     const userId = req.session.user.id;
     const guilds = [...client.guilds.cache.values()]
@@ -2033,7 +2062,7 @@ app.post('/api/redeem-promo', requireAuth, (req, res) => {
     const durationLabel = durationDays >= 36500 ? 'à vie'
         : durationHours < 24 ? `${durationHours}h`
         : `${Math.round(durationDays)} jour${Math.round(durationDays) > 1 ? 's' : ''}`;
-    subs[userId] = { active: true, startedAt: Date.now(), expiresAt, promoCode: code };
+    subs[userId] = { active: true, startedAt: Date.now(), expiresAt, promoCode: code, tier: promo.tier || 'premium' };
     saveSubs(subs);
 
     // Met à jour la session
@@ -2173,6 +2202,8 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('genpromo')
                     .setDescription('🎟️ Générer un code promo [OWNER ONLY]')
+                    .addStringOption(o => o.setName('tier').setDescription('Type d\'accès').setRequired(true)
+                        .addChoices({ name: '🤖 Bot (3€) — /setchannel + demandes Discord', value: 'bot' }, { name: '💎 Premium (6€) — Bot + dashboard complet', value: 'premium' }))
                     .addIntegerOption(o => o.setName('heures').setDescription('Durée en heures (ex: 24)').setRequired(true).setMinValue(1).setMaxValue(8760))
                     .addIntegerOption(o => o.setName('utilisations').setDescription('Nombre max d\'utilisations (défaut: 1)').setRequired(false).setMinValue(1))
                     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)

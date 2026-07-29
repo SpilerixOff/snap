@@ -711,9 +711,10 @@ async function init() {
         document.getElementById('uAvatar').src = me.avatarUrl;
         document.getElementById('uName').textContent = me.username;
         const b = document.getElementById('uBadge');
-        if (me.isOwner)       { b.textContent='👑 Owner'; b.className='badge owner'; }
-        else if (me.isPremium){ b.textContent='⭐ Premium'; b.className='badge premium'; }
-        else                  { b.textContent='Gratuit'; b.className='badge free'; }
+        if (me.isOwner)        { b.textContent='👑 Owner'; b.className='badge owner'; }
+        else if (me.isPremium) { b.textContent='⭐ Premium'; b.className='badge premium'; }
+        else if (me.isBotTier) { b.textContent='🤖 Bot'; b.className='badge premium'; }
+        else                   { b.textContent='Gratuit'; b.className='badge free'; }
 
         // Bannière d'invitation (owner seulement)
         if (me.isOwner && me.inviteLink) {
@@ -929,7 +930,7 @@ async function lgGenerate() {
 async function loadServers() {
     const el = document.getElementById('serversContent');
     const lgenCard = document.getElementById('linkGenCard');
-    if (!me.isPremium && !me.isOwner) { el.innerHTML=gate(); if(lgenCard) lgenCard.style.display='none'; return; }
+    if (!me.isPremium && !me.isOwner && !me.isBotTier) { el.innerHTML=gate(); if(lgenCard) lgenCard.style.display='none'; return; }
 
     // Notifications (owner only)
     if (me.isOwner) {
