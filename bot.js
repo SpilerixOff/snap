@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, REST, Routes, ActivityType, ComponentType, PermissionFlagsBits } = require('discord.js');
 const { v4: uuidv4 } = require('uuid');
-const session = require('express-session');
+const cookieSession = require('cookie-session');
 
 // Stripe (optionnel — uniquement si STRIPE_SECRET_KEY est défini)
 let stripe = null;
@@ -24,12 +24,15 @@ app.set('trust proxy', true);
 // ⚡ Stripe webhook : raw body AVANT express.json()
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 
-// Sessions (dashboard auth)
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'snap-dashboard-' + Math.random().toString(36).slice(2),
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' }
+// Sessions persistantes (cookie-session = stocké dans le cookie, survive aux restarts)
+const SESSION_SECRET = process.env.SESSION_SECRET || 'snap-static-secret-42xZ9';
+app.use(cookieSession({
+    name: 'snap_sess',
+    keys: [SESSION_SECRET],
+    maxAge: 365 * 24 * 60 * 60 * 1000, // 1 an
+    sameSite: 'lax',
+    httpOnly: true,
+    secure: false, // Render gère le HTTPS en proxy
 }));
 
 app.use(express.json());
