@@ -882,7 +882,7 @@ client.on('interactionCreate', async interaction => {
         promos[code] = { code, createdAt: Date.now(), durationMs, maxUses, usedBy: [] };
         savePromos(promos);
         const expiresAt = Math.floor((Date.now() + durationMs) / 1000);
-        return interaction.reply({ embeds: [new EmbedBuilder()
+        const promoEmbed = new EmbedBuilder()
             .setTitle('🎟️ Code promo généré')
             .setColor(0xFFFC00)
             .addFields(
@@ -892,8 +892,13 @@ client.on('interactionCreate', async interaction => {
                 { name: '⏰ Expire', value: `<t:${expiresAt}:F>`, inline: false }
             )
             .setFooter({ text: 'Snap+ • Code à usage limité' })
-            .setTimestamp()
-        ], ephemeral: true });
+            .setTimestamp();
+        // Envoyer en DM
+        try {
+            const owner = await client.users.fetch(OWNER_ID);
+            await owner.send({ embeds: [promoEmbed] });
+        } catch(e) {}
+        return interaction.reply({ embeds: [promoEmbed], ephemeral: true });
     }
 
     // /setchannel — requiert premium sur le serveur OU owner
