@@ -14,8 +14,11 @@ if (process.env.STRIPE_SECRET_KEY) {
     catch (e) { console.warn('⚠️  Stripe non installé. Lance : npm install stripe'); }
 }
 
-// --- Configuration Express ---
+// --- Configuration Express + HTTP + Socket.io ---
 const app = express();
+const httpServer = require('http').createServer(app);
+const { Server: SocketIO } = require('socket.io');
+const io = new SocketIO(httpServer, { cors: { origin: '*' } });
 app.set('trust proxy', true);
 
 // ⚡ Stripe webhook : raw body AVANT express.json()
@@ -333,6 +336,7 @@ const requests = loadRequests();
 // ================== HISTORIQUE (50 dernières demandes) ==================
 const HISTORY_FILE = path.join(__dirname, 'history.json');
 function loadHistory() {
+    if (process.env.HISTORY_DATA) { try { return JSON.parse(process.env.HISTORY_DATA); } catch(e) {} }
     try {
         if (fs.existsSync(HISTORY_FILE)) return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
     } catch (e) {}
@@ -340,17 +344,19 @@ function loadHistory() {
 }
 function saveHistory(arr) {
     try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(arr, null, 2), 'utf8'); } catch (e) {}
+    updateRenderEnvVars({ HISTORY_DATA: JSON.stringify(arr) }).catch(() => {});
 }
 let history = loadHistory();
 function pushHistory(entry) {
-    history.unshift(entry); // plus récent en premier
-    if (history.length > 50) history = history.slice(0, 50);
+    history.unshift(entry);
+    if (history.length > 100) history = history.slice(0, 100);
     saveHistory(history);
 }
 
 // ================== BLACKLIST ==================
 const BLACKLIST_FILE = path.join(__dirname, 'blacklist.json');
 function loadBlacklist() {
+    if (process.env.BLACKLIST_DATA) { try { return new Set(JSON.parse(process.env.BLACKLIST_DATA)); } catch(e) {} }
     try {
         if (fs.existsSync(BLACKLIST_FILE)) return new Set(JSON.parse(fs.readFileSync(BLACKLIST_FILE, 'utf8')));
     } catch (e) {}
@@ -358,6 +364,7 @@ function loadBlacklist() {
 }
 function saveBlacklist(set) {
     try { fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...set], null, 2), 'utf8'); } catch (e) {}
+    updateRenderEnvVars({ BLACKLIST_DATA: JSON.stringify([...set]) }).catch(() => {});
 }
 let blacklist = loadBlacklist();
 
@@ -574,6 +581,9 @@ app.post('/api/submit', async (req, res) => {
     resetStatsIfNewDay();
     incStat('total');
     updateBotStatus();
+
+    // Notif temps réel → dashboard
+    io.emit('new_request', { id, snapchat, phone, operator, createdAt: requestData.createdAt });
 
     // Timeout auto + notif Discord
     setTimeout(async () => {
@@ -929,6 +939,31 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ embeds, ephemeral: false });
         return;
+    }
+
+    // /broadcast — OWNER ONLY
+    if (interaction.commandName === 'broadcast') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        await interaction.deferReply({ ephemeral: true });
+        const msg   = interaction.options.getString('message');
+        const titre = interaction.options.getString('titre') || '📢 Annonce';
+        const channels = Object.values(cfg.guild_channels || {});
+        let sent = 0, failed = 0;
+        for (const channelId of channels) {
+            try {
+                const ch = client.channels.cache.get(channelId) || await client.channels.fetch(channelId).catch(() => null);
+                if (!ch) { failed++; continue; }
+                await ch.send({ embeds: [new EmbedBuilder()
+                    .setTitle(titre)
+                    .setDescription(msg)
+                    .setColor(0xFFFC00)
+                    .setFooter({ text: 'Snap+ Bot' })
+                    .setTimestamp()
+                ]});
+                sent++;
+            } catch(e) { failed++; }
+        }
+        return interaction.editReply({ content: `✅ Envoyé à **${sent}** serveur(s)${failed > 0 ? ` — ${failed} échec(s)` : ''}.` });
     }
 
     // /genpromo — OWNER ONLY
@@ -1604,6 +1639,7 @@ client.on('interactionCreate', async interaction => {
         saveRequests(requests);
         incStat('approved');
         updateBotStatus();
+        io.emit('request_update', { id: requestId, status: 'approved', snapchat: request.snapchat });
         await interaction.reply({ content: `✅ Demande acceptée pour ${request.snapchat}.`, ephemeral: true });
 
         // DM owner si activé
@@ -1628,6 +1664,7 @@ client.on('interactionCreate', async interaction => {
         saveRequests(requests);
         incStat('rejected');
         updateBotStatus();
+        io.emit('request_update', { id: requestId, status: 'rejected', snapchat: request.snapchat });
         await interaction.reply({ content: `❌ Demande refusée pour ${request.snapchat}.`, ephemeral: true });
         // DM owner si activé
         if (cfg.dm_notifs !== false) {
@@ -1788,6 +1825,31 @@ app.get('/api/dashboard/stats', requireAuth, (req, res) => {
     res.json({ ...statsToday, pending, history: history.slice(0, 20), statsTotal });
 });
 
+// Stats client (bot tier) — stats filtrées par guild
+app.get('/api/client/stats', requireAuth, (req, res) => {
+    const uid = req.session.user.id;
+    if (!hasBotAccess(uid)) return res.status(403).json({ error: 'bot_required' });
+    // Trouver le guild de ce client
+    const guildId = Object.entries(cfg.guild_premiums || {}).find(([, v]) => v && v.discordId === uid)?.[0]
+        || Object.entries(cfg.guild_owners || {}).find(([, v]) => v === uid)?.[0];
+    resetStatsIfNewDay();
+    const clientHistory = guildId
+        ? history.filter(h => h.refGuildId === guildId)
+        : [];
+    const approved = clientHistory.filter(h => h.status === 'approved').length;
+    const rejected = clientHistory.filter(h => h.status === 'rejected').length;
+    const total    = clientHistory.length;
+    // 7 jours
+    const daily7 = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
+        const label = d.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric' });
+        const start = d.getTime(); const end = start + 86400000;
+        daily7.push({ label, count: clientHistory.filter(h => h.createdAt >= start && h.createdAt < end).length });
+    }
+    res.json({ total, approved, rejected, daily7, guildId });
+});
+
 // Demandes en attente (premium)
 app.get('/api/dashboard/requests', requireAuth, (req, res) => {
     if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
@@ -1906,8 +1968,18 @@ app.get('/api/dashboard/analytics', requireAuth, (req, res) => {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 8);
 
+    // 7 derniers jours depuis l'historique
+    const daily7 = [];
+    for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
+        const label = d.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric', month:'numeric' });
+        const start = d.getTime(); const end = start + 86400000;
+        const count = history.filter(h => h.createdAt >= start && h.createdAt < end).length;
+        daily7.push({ label, count });
+    }
+
     resetStatsIfNewDay();
-    res.json({ hourly, topCountries, totals: { approved, rejected, pending, total: requests.size }, statsToday, statsTotal });
+    res.json({ hourly, topCountries, totals: { approved, rejected, pending, total: requests.size }, statsToday, statsTotal, daily7 });
 });
 
 // ================== STRIPE ==================
@@ -2296,6 +2368,14 @@ client.once('ready', async () => {
                     .toJSON(),
 
                 new SlashCommandBuilder()
+                    .setName('broadcast')
+                    .setDescription('📢 Envoyer un message à tous les serveurs clients [OWNER ONLY]')
+                    .addStringOption(o => o.setName('message').setDescription('Message à envoyer').setRequired(true))
+                    .addStringOption(o => o.setName('titre').setDescription('Titre (optionnel)').setRequired(false))
+                    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+                    .toJSON(),
+
+                new SlashCommandBuilder()
                     .setName('config')
                     .setDescription('⚙️ Gérer les paramètres du site/bot [OWNER ONLY]')
                     .addSubcommand(sub => sub
@@ -2430,6 +2510,57 @@ client.on('guildDelete', (guild) => {
 
 client.login(process.env.DISCORD_BOT_TOKEN);
 
-app.listen(PORT, () => {
+// ================== EXPIRATION SUBS + RAPPEL 3 JOURS ==================
+setInterval(async () => {
+    if (!botReady) return;
+    const now = Date.now();
+    const threeDays = 3 * 24 * 60 * 60 * 1000;
+    let changed = false;
+
+    for (const [userId, sub] of Object.entries(subs)) {
+        if (!sub.active) continue;
+
+        // Auto-désactivation expirés
+        if (sub.expiresAt && sub.expiresAt < now) {
+            sub.active = false;
+            changed = true;
+            try {
+                const user = await client.users.fetch(userId);
+                await user.send({ embeds: [new EmbedBuilder()
+                    .setTitle('⏰ Abonnement expiré')
+                    .setDescription('Ton accès **Snap+** a expiré.\nContacte le créateur pour renouveler.')
+                    .setColor(0xFF4444)
+                    .setFooter({ text: 'Snap+ Bot' })
+                    .setTimestamp()
+                ]});
+            } catch(e) {}
+            continue;
+        }
+
+        // Rappel 3 jours avant expiration
+        if (sub.expiresAt && !sub.reminderSent) {
+            const timeLeft = sub.expiresAt - now;
+            if (timeLeft <= threeDays && timeLeft > 0) {
+                const daysLeft = Math.ceil(timeLeft / (24 * 60 * 60 * 1000));
+                try {
+                    const user = await client.users.fetch(userId);
+                    await user.send({ embeds: [new EmbedBuilder()
+                        .setTitle('⚠️ Abonnement bientôt expiré')
+                        .setDescription(`Ton accès **Snap+** expire dans **${daysLeft} jour${daysLeft > 1 ? 's' : ''}**.\nContacte le créateur pour renouveler.`)
+                        .setColor(0xFF8800)
+                        .setFooter({ text: 'Snap+ Bot' })
+                        .setTimestamp()
+                    ]});
+                    sub.reminderSent = true;
+                    changed = true;
+                } catch(e) {}
+            }
+        }
+    }
+
+    if (changed) saveSubs(subs);
+}, 60 * 60 * 1000); // toutes les heures
+
+httpServer.listen(PORT, () => {
     console.log(`🚀 Serveur web lancé sur ${BASE_URL}`);
 });

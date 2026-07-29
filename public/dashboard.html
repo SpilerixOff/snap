@@ -458,9 +458,23 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
     .mob-btn { display:block; }
     .content { padding:16px; }
 }
+/* Notification temps réel */
+.rt-notif { position:fixed; bottom:24px; right:24px; background:var(--card); border:1px solid var(--y); border-radius:14px; padding:14px 18px; display:flex; align-items:center; gap:12px; z-index:9999; box-shadow:0 8px 32px #0008; transform:translateY(120px); opacity:0; transition:all .4s cubic-bezier(.68,-.55,.27,1.55); max-width:320px; }
+.rt-notif.show { transform:translateY(0); opacity:1; }
+.rt-notif-icon { font-size:22px; }
+.rt-notif-body { flex:1; }
+.rt-notif-title { font-size:13px; font-weight:700; color:var(--y); }
+.rt-notif-sub { font-size:12px; color:var(--muted2); margin-top:2px; }
 </style>
 </head>
 <body>
+<div class="rt-notif" id="rtNotif">
+    <div class="rt-notif-icon">📱</div>
+    <div class="rt-notif-body">
+        <div class="rt-notif-title" id="rtNotifTitle">Nouvelle demande</div>
+        <div class="rt-notif-sub" id="rtNotifSub"></div>
+    </div>
+</div>
 
 <div class="layout">
 <!-- SIDEBAR -->
@@ -501,6 +515,7 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
 
         <div class="s-section">Compte</div>
         <div class="nav-item" data-s="subscription"><i class="fas fa-crown"></i> Abonnement</div>
+        <div class="nav-item" id="navClientStats" data-s="clientstats" style="display:none"><i class="fas fa-chart-bar"></i> Mes stats</div>
     </div>
 
     <div class="s-footer">
@@ -668,8 +683,23 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
                 </div>
             </div>
             <div class="card" style="margin-top:16px">
+                <div class="card-header"><div class="card-title"><i class="fas fa-calendar-week"></i> Demandes — 7 derniers jours</div></div>
+                <div style="padding:16px"><canvas id="chartDaily" height="100"></canvas></div>
+            </div>
+            <div class="card" style="margin-top:16px">
                 <div class="card-header"><div class="card-title"><i class="fas fa-check-circle"></i> Taux d'acceptation</div></div>
                 <div style="padding:20px" id="an-rate"></div>
+            </div>
+        </div>
+
+        <!-- CLIENT STATS -->
+        <div id="s-clientstats" class="section">
+            <div class="page-title">Mes statistiques</div>
+            <div class="page-sub">Stats de ton serveur.</div>
+            <div class="stats-grid" id="cs-totals"></div>
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><div class="card-title"><i class="fas fa-calendar-week"></i> Demandes — 7 derniers jours</div></div>
+                <div style="padding:16px"><canvas id="chartClientDaily" height="120"></canvas></div>
             </div>
         </div>
 
@@ -695,9 +725,56 @@ let me = null, cfg = null, cur = 'home';
 const TITLES = {
     home:'Tableau de bord', requests:'Demandes', servers:'Serveurs Discord',
     apparence:'Apparence', options:'Options', blacklist:'Blacklist IP',
-    promos:'Codes promo', analytics:'Analytics', subscription:'Abonnement'
+    promos:'Codes promo', analytics:'Analytics', subscription:'Abonnement', clientstats:'Mes stats'
 };
-let chartHourly = null, chartCountries = null;
+let chartHourly = null, chartCountries = null, chartDaily = null, chartClientDaily = null;
+
+// ════════════════════════════════════════
+// SOCKET.IO — NOTIFICATIONS TEMPS RÉEL
+// ════════════════════════════════════════
+(function initSocket() {
+    const s = document.createElement('script');
+    s.src = '/socket.io/socket.io.js';
+    s.onload = () => {
+        const socket = io();
+        let notifTimer = null;
+
+        function showRtNotif(title, sub) {
+            const el = document.getElementById('rtNotif');
+            document.getElementById('rtNotifTitle').textContent = title;
+            document.getElementById('rtNotifSub').textContent = sub;
+            el.classList.add('show');
+            if (notifTimer) clearTimeout(notifTimer);
+            notifTimer = setTimeout(() => el.classList.remove('show'), 5000);
+            // Son discret
+            try {
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.15);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+                osc.start(); osc.stop(ctx.currentTime + 0.3);
+            } catch(e) {}
+        }
+
+        socket.on('new_request', (data) => {
+            showRtNotif('📱 Nouvelle demande !', `${data.snapchat} · ${data.phone}`);
+            if (cur === 'home') loadHome();
+            if (cur === 'requests') loadRequests();
+        });
+
+        socket.on('request_update', (data) => {
+            const emoji = data.status === 'approved' ? '✅' : '❌';
+            showRtNotif(`${emoji} Demande ${data.status === 'approved' ? 'acceptée' : 'refusée'}`, data.snapchat);
+            if (cur === 'home') loadHome();
+            if (cur === 'requests') loadRequests();
+        });
+    };
+    document.head.appendChild(s);
+})();
 
 // ════════════════════════════════════════
 // INIT
@@ -731,6 +808,12 @@ async function init() {
         if (params.get('success')==='1') { toast('🎉 Premium activé !','ok'); history.replaceState({},'','/dashboard'); }
         if (params.get('cancelled')==='1') { toast('Paiement annulé.','err'); history.replaceState({},'','/dashboard'); }
 
+        // Afficher "Mes stats" pour les clients bot/premium (pas owner)
+        if ((me.isBotTier || me.isPremium) && !me.isOwner) {
+            const n = document.getElementById('navClientStats');
+            if (n) n.style.display = '';
+        }
+
         await loadHome();
     } catch(e) { location.href='/login'; }
 }
@@ -759,6 +842,7 @@ async function goTo(s) {
     if (s==='blacklist')    await loadBlacklist();
     if (s==='promos')       await loadPromos();
     if (s==='analytics')    await loadAnalytics();
+    if (s==='clientstats')  await loadClientStats();
     if (s==='subscription') renderSub();
 }
 
@@ -1454,7 +1538,52 @@ async function loadAnalytics() {
             options: { ...CHART_OPTS, indexAxis: 'y', scales: { ...CHART_OPTS.scales, x: { ...CHART_OPTS.scales.x }, y: { ticks: { color:'#ccc', font:{ size:11 } }, grid:{ color:'#2a2a2a' } } } }
         });
 
+        // Graphique 7 jours
+        if (d.daily7 && d.daily7.length) {
+            if (chartDaily) chartDaily.destroy();
+            chartDaily = new Chart(document.getElementById('chartDaily'), {
+                type: 'bar',
+                data: {
+                    labels: d.daily7.map(x=>x.label),
+                    datasets: [{ data: d.daily7.map(x=>x.count), backgroundColor: '#a855f7aa', borderColor: '#a855f7', borderWidth: 1, borderRadius: 4, label: 'Demandes' }]
+                },
+                options: { ...CHART_OPTS, plugins: { legend: { display: false } } }
+            });
+        }
+
     } catch(e) { console.error(e); }
+}
+
+// ════════════════════════════════════════
+// CLIENT STATS
+// ════════════════════════════════════════
+async function loadClientStats() {
+    const el = document.getElementById('cs-totals');
+    el.innerHTML = '<div style="color:var(--muted)">Chargement…</div>';
+    try {
+        const d = await (await fetch('/api/client/stats')).json();
+        if (d.error) { el.innerHTML=`<div style="color:var(--err)">${d.error}</div>`; return; }
+        const rate = d.total > 0 ? Math.round(d.approved / d.total * 100) : 0;
+        el.innerHTML = `
+            <div class="stat-card c-yellow"><div class="stat-label">Total</div><div class="stat-value">${d.total}</div><div class="stat-sub">demandes reçues</div></div>
+            <div class="stat-card c-green"><div class="stat-label">Acceptées</div><div class="stat-value">${d.approved}</div><div class="stat-sub">par l'owner</div></div>
+            <div class="stat-card c-red"><div class="stat-label">Refusées</div><div class="stat-value">${d.total - d.approved}</div><div class="stat-sub">ou expirées</div></div>
+            <div class="stat-card c-purple"><div class="stat-label">Taux accept.</div><div class="stat-value">${rate}%</div><div class="stat-sub">global</div></div>`;
+        if (!window.Chart) {
+            await new Promise((res,rej) => { const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
+        }
+        if (d.daily7 && d.daily7.length) {
+            if (chartClientDaily) chartClientDaily.destroy();
+            chartClientDaily = new Chart(document.getElementById('chartClientDaily'), {
+                type: 'bar',
+                data: {
+                    labels: d.daily7.map(x=>x.label),
+                    datasets: [{ data: d.daily7.map(x=>x.count), backgroundColor: '#FFD600aa', borderColor: '#FFD600', borderWidth: 1, borderRadius: 4 }]
+                },
+                options: { responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:10}},grid:{color:'#2a2a2a'}}, y:{ticks:{color:'#888',font:{size:10}},grid:{color:'#2a2a2a'},beginAtZero:true,precision:0} } }
+            });
+        }
+    } catch(e) { el.innerHTML='<div style="color:var(--err)">Erreur</div>'; }
 }
 
 // CODES PROMO
