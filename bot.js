@@ -16,7 +16,7 @@ app.set('trust proxy', true);
 
 // --- Configuration Discord ---
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildIntegrations]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
 let botReady = false;
