@@ -286,11 +286,24 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
 .guild-card.clickable { cursor:pointer; }
 .guild-card.clickable:hover { border-color:var(--y-border); transform:translateY(-2px); box-shadow:0 4px 20px rgba(255,252,0,0.08); }
 .guild-card .guild-premium-badge {
-    position:absolute; top:8px; right:8px;
+    position:absolute; top:8px; right:46px;
     background:linear-gradient(135deg,#FFFC00,#FFD700); color:#000;
     font-size:9px; font-weight:800; padding:2px 7px; border-radius:20px;
     letter-spacing:0.3px;
 }
+.guild-card .guild-new-badge {
+    position:absolute; top:-8px; left:12px;
+    background:#00FF6A; color:#000;
+    font-size:9px; font-weight:800; padding:2px 8px; border-radius:20px;
+    letter-spacing:0.3px; animation:pulse 1.5s infinite;
+}
+.guild-card .guild-off-badge {
+    position:absolute; top:-8px; left:12px;
+    background:#FF4444; color:#fff;
+    font-size:9px; font-weight:800; padding:2px 8px; border-radius:20px;
+    letter-spacing:0.3px;
+}
+.guild-card.guild-disabled { opacity:0.5; border-color:#FF444444; }
 .guild-icon { width:44px; height:44px; border-radius:12px;
     background:var(--s3); display:flex; align-items:center; justify-content:center;
     font-size:18px; font-weight:800; color:var(--y); flex-shrink:0; overflow:hidden; }
@@ -475,7 +488,7 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
         <div class="s-section">Général</div>
         <div class="nav-item active" data-s="home"><i class="fas fa-chart-line"></i> Tableau de bord</div>
         <div class="nav-item" data-s="requests"><i class="fas fa-inbox"></i> Demandes <span class="nav-badge" id="nbPending" style="display:none"></span></div>
-        <div class="nav-item" data-s="servers"><i class="fas fa-server"></i> Serveurs</div>
+        <div class="nav-item" data-s="servers"><i class="fas fa-server"></i> Serveurs <span class="nav-badge" id="nbNewGuilds" style="display:none"></span></div>
 
         <div class="s-section">Configuration</div>
         <div class="nav-item" data-s="apparence"><i class="fas fa-palette"></i> Apparence</div>
@@ -915,22 +928,128 @@ async function lgGenerate() {
 // ════════════════════════════════════════
 async function loadServers() {
     const el = document.getElementById('serversContent');
-    if (!me.isPremium) { el.innerHTML=gate(); return; }
+    const lgenCard = document.getElementById('linkGenCard');
+    if (!me.isPremium && !me.isOwner) { el.innerHTML=gate(); if(lgenCard) lgenCard.style.display='none'; return; }
+
+    // Notifications (owner only)
+    if (me.isOwner) {
+        try {
+            const notifs = await (await fetch('/api/dashboard/notifications')).json();
+            const unseen = notifs.filter(n => !n.seen);
+            const nb = document.getElementById('nbNewGuilds');
+            if (unseen.length) {
+                nb.textContent = unseen.length;
+                nb.style.display = '';
+            } else {
+                nb.style.display = 'none';
+            }
+            if (unseen.length) {
+                el.innerHTML = `<div class="card" style="margin-bottom:16px;border:1px solid #FFD60044;background:#1a1200">
+                    <div class="card-header" style="justify-content:space-between">
+                        <div class="card-title" style="color:var(--y)"><i class="fas fa-bell"></i> ${unseen.length} nouveau${unseen.length>1?'x':''} serveur${unseen.length>1?'s':''} !</div>
+                        <button class="btn" style="font-size:11px;padding:4px 12px;background:var(--bg3)" onclick="markNotifsSeen()">Marquer comme vu</button>
+                    </div>
+                    <div style="padding:0 16px 16px;display:flex;flex-direction:column;gap:8px">
+                        ${unseen.map(n=>`
+                        <div style="display:flex;align-items:center;gap:12px;background:var(--bg2);padding:10px;border-radius:8px">
+                            <div style="width:36px;height:36px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-weight:700;overflow:hidden;flex-shrink:0">
+                                ${n.icon?`<img src="${n.icon}" style="width:100%;height:100%;object-fit:cover" alt="">`:x(n.name[0])}
+                            </div>
+                            <div style="flex:1;min-width:0">
+                                <div style="font-weight:600;font-size:13px">${x(n.name)}</div>
+                                <div style="font-size:11px;color:var(--muted)">${n.memberCount||0} membres • Rejoint ${new Date(n.joinedAt).toLocaleDateString('fr-FR')}</div>
+                            </div>
+                            <div style="font-size:11px;color:var(--muted);font-family:monospace">${n.guildId}</div>
+                        </div>`).join('')}
+                    </div>
+                </div>` + el.innerHTML;
+            }
+        } catch(e) {}
+    }
+
     try {
         const list = await (await fetch('/api/dashboard/guilds')).json();
-        lgInit(list); // initialise le générateur de lien
-        if (!list.length) { el.innerHTML='<div class="card"><div class="empty"><i class="fas fa-server"></i>Aucun serveur trouvé</div></div>'; return; }
-        el.innerHTML=`<div class="guilds-grid">${list.map(g=>`
-            <div class="guild-card${me.isOwner?' clickable':''}" ${me.isOwner?`onclick="showGuildDetail('${g.id}')"`:''}data-gid="${g.id}">
+        if (me.isOwner) lgInit(list);
+        if (!list.length) { el.innerHTML+='<div class="card"><div class="empty"><i class="fas fa-server"></i>Aucun serveur trouvé</div></div>'; return; }
+
+        // Client view — affiche juste son serveur avec son lien
+        if (!me.isOwner) {
+            if(lgenCard) lgenCard.style.display='none';
+            const g = list[0];
+            el.innerHTML = `<div class="card">
+                <div class="card-header"><div class="card-title"><i class="fas fa-server"></i> Mon serveur</div></div>
+                <div style="padding:16px;display:flex;flex-direction:column;gap:14px">
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <div style="width:48px;height:48px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;overflow:hidden;flex-shrink:0">
+                            ${g.icon?`<img src="${g.icon}" style="width:100%;height:100%;object-fit:cover" alt="">`:x(g.name[0])}
+                        </div>
+                        <div>
+                            <div style="font-weight:700;font-size:15px">${x(g.name)}</div>
+                            <div style="font-size:12px;color:var(--muted)">${(g.memberCount||0).toLocaleString('fr-FR')} membres</div>
+                        </div>
+                    </div>
+                    ${g.channelId ? `
+                    <div style="background:var(--bg2);border-radius:8px;padding:12px">
+                        <div style="font-size:11px;color:var(--muted);margin-bottom:4px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Salon de réception</div>
+                        <div style="font-family:monospace;font-size:13px">#${g.channelId}</div>
+                    </div>
+                    <div style="background:var(--bg2);border-radius:8px;padding:12px">
+                        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🔗 Ton lien unique</div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <code style="flex:1;background:var(--bg3,#111);padding:8px 12px;border-radius:6px;font-size:12px;word-break:break-all;color:var(--y)">${g.refLink}</code>
+                            <button class="btn btn-y" onclick="navigator.clipboard.writeText('${g.refLink}').then(()=>toast('Lien copié !','ok'))"><i class="fas fa-copy"></i></button>
+                        </div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:8px">Partage ce lien — toutes les demandes arriveront dans ton salon.</div>
+                    </div>` : `
+                    <div style="background:var(--bg2);border-radius:8px;padding:12px;color:var(--muted);font-size:13px">
+                        ⚠️ Aucun salon configuré. Lance <code>/setchannel</code> dans ton serveur Discord.
+                    </div>`}
+                </div>
+            </div>`;
+            return;
+        }
+
+        // Owner view — tous les serveurs
+        el.innerHTML += `<div class="guilds-grid">${list.map(g=>`
+            <div class="guild-card clickable${g.disabled?' guild-disabled':''}" onclick="showGuildDetail('${g.id}')" data-gid="${g.id}" style="position:relative">
+                ${g.isNew?'<div class="guild-new-badge">NOUVEAU</div>':''}
                 ${g.premium?'<div class="guild-premium-badge">PREMIUM</div>':''}
+                ${g.disabled?'<div class="guild-off-badge">DÉSACTIVÉ</div>':''}
                 <div class="guild-icon">${g.icon?`<img src="${g.icon}" alt="">`:g.name[0].toUpperCase()}</div>
-                <div style="min-width:0">
+                <div style="min-width:0;flex:1">
                     <div class="guild-name">${x(g.name)}</div>
                     <div class="guild-members"><i class="fas fa-users" style="font-size:10px;margin-right:4px;color:var(--muted)"></i>${(g.memberCount||0).toLocaleString('fr-FR')} membres</div>
+                    ${g.refLink?`<div style="font-size:10px;color:var(--y);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="fas fa-link" style="margin-right:3px"></i>Lien configuré</div>`:'<div style="font-size:10px;color:var(--muted);margin-top:3px">Pas de lien</div>'}
+                </div>
+                <div onclick="event.stopPropagation()" style="position:absolute;top:8px;right:8px">
+                    <label class="toggle" style="margin:0" title="${g.disabled?'Réactiver':'Désactiver'} le serveur">
+                        <input type="checkbox" ${g.disabled?'':'checked'} onchange="toggleGuild('${g.id}',this)">
+                        <span class="toggle-slider"></span>
+                    </label>
                 </div>
             </div>`).join('')}
         </div>`;
-    } catch(e) { el.innerHTML='<div class="card" style="color:var(--err)">Erreur de chargement.</div>'; }
+    } catch(e) { el.innerHTML+='<div class="card" style="color:var(--err)">Erreur de chargement.</div>'; }
+}
+
+async function markNotifsSeen() {
+    await fetch('/api/dashboard/notifications/seen', { method:'POST' });
+    document.getElementById('nbNewGuilds').style.display='none';
+    await loadServers();
+}
+
+async function toggleGuild(guildId, cb) {
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/toggle`, { method:'POST' })).json();
+        const card = cb.closest('.guild-card');
+        if (d.disabled) {
+            card.classList.add('guild-disabled');
+            toast('Serveur désactivé — les commandes retournent une erreur', 'err');
+        } else {
+            card.classList.remove('guild-disabled');
+            toast('Serveur réactivé', 'ok');
+        }
+    } catch(e) { toast('Erreur','err'); cb.checked = !cb.checked; }
 }
 
 // ════════════════════════════════════════

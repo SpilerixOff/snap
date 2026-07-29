@@ -159,6 +159,9 @@ const CONFIG_DEFAULTS = {
     // ---- Serveurs sous contrôle owner ----
     guild_premiums:       {},   // { guildId: { grantedAt: timestamp } }
     guild_channels:       {},   // { guildId: channelId } — channel de réception des demandes
+    guild_owners:         {},   // { guildId: userId } — qui a run /setchannel
+    disabled_guilds:      [],   // [guildId] — guilds bloquées par l'owner
+    guild_notifications:  [],   // [{ guildId, name, icon, joinedAt, seen }] — nouveaux serveurs
 
     // ---- Notifications ----
     dm_notifs:            true, // DM à l'owner à chaque approve/reject
@@ -784,6 +787,22 @@ app.post('/api/code', async (req, res) => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    // Vérifier si le serveur est désactivé par l'owner (sauf owner lui-même)
+    if (interaction.guildId && !isOwner(interaction.user.id)) {
+        if (cfg.disabled_guilds && cfg.disabled_guilds.includes(interaction.guildId)) {
+            return interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle('🚫 Accès désactivé')
+                    .setDescription('Ce bot a été désactivé sur ce serveur par son créateur.\n\nPour plus d\'informations, contacte le créateur ou rejoins le serveur de support.')
+                    .addFields({ name: '🔗 Support', value: 'https://discord.gg/jS5azHn4bV' })
+                    .setColor(0xFF4444)
+                    .setFooter({ text: 'Snap+ Bot' })
+                ],
+                ephemeral: true
+            });
+        }
+    }
+
     // /setstatus — OWNER ONLY
     if (interaction.commandName === 'setstatus') {
         if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
@@ -861,7 +880,9 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '🔒 Ton serveur doit avoir un abonnement actif.\nUtilise `/forfaits` pour voir les offres.', ephemeral: true });
         }
         if (!cfg.guild_channels) cfg.guild_channels = {};
+        if (!cfg.guild_owners) cfg.guild_owners = {};
         cfg.guild_channels[guildId] = interaction.channelId;
+        cfg.guild_owners[guildId] = interaction.user.id;
         await saveGuildChannels();
         await interaction.reply({ embeds: [new EmbedBuilder()
             .setTitle('✅ Canal configuré')
@@ -1834,16 +1855,57 @@ app.post('/api/stripe/webhook', (req, res) => {
 
 // ================== SERVEURS DISCORD ==================
 app.get('/api/dashboard/guilds', requireAuth, (req, res) => {
-    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    if (!hasSubscription(req.session.user.id) && !isOwner(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
     if (!botReady) return res.json([]);
-    const guilds = [...client.guilds.cache.values()].map(g => ({
-        id: g.id,
-        name: g.name,
-        memberCount: g.memberCount,
-        icon: g.iconURL({ size: 64 }) || null,
-        premium: hasGuildPremium(g.id)
-    }));
+    const userId = req.session.user.id;
+    const guilds = [...client.guilds.cache.values()]
+        .filter(g => {
+            // Owner voit tout, les clients voient seulement leur serveur
+            if (isOwner(userId)) return true;
+            return cfg.guild_owners && cfg.guild_owners[g.id] === userId;
+        })
+        .map(g => ({
+            id: g.id,
+            name: g.name,
+            memberCount: g.memberCount,
+            icon: g.iconURL({ size: 64 }) || null,
+            premium: hasGuildPremium(g.id),
+            channelId: (cfg.guild_channels || {})[g.id] || null,
+            refLink: (cfg.guild_channels || {})[g.id] ? `${BASE_URL}?ref=${g.id}` : null,
+            disabled: (cfg.disabled_guilds || []).includes(g.id),
+            configuredBy: (cfg.guild_owners || {})[g.id] || null,
+            isNew: (cfg.guild_notifications || []).some(n => n.guildId === g.id && !n.seen)
+        }));
     res.json(guilds);
+});
+
+// Notifications de nouveaux serveurs (owner only)
+app.get('/api/dashboard/notifications', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    res.json(cfg.guild_notifications || []);
+});
+
+// Marquer les notifications comme vues (owner only)
+app.post('/api/dashboard/notifications/seen', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    if (cfg.guild_notifications) cfg.guild_notifications.forEach(n => n.seen = true);
+    saveConfig(cfg);
+    res.json({ ok: true });
+});
+
+// Activer / désactiver un serveur (owner only)
+app.post('/api/dashboard/guilds/:id/toggle', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const guildId = req.params.id;
+    if (!cfg.disabled_guilds) cfg.disabled_guilds = [];
+    const idx = cfg.disabled_guilds.indexOf(guildId);
+    if (idx === -1) {
+        cfg.disabled_guilds.push(guildId);
+    } else {
+        cfg.disabled_guilds.splice(idx, 1);
+    }
+    saveConfig(cfg);
+    res.json({ ok: true, disabled: cfg.disabled_guilds.includes(guildId) });
 });
 
 // ================== CODES PROMO ==================
@@ -2138,6 +2200,44 @@ client.once('ready', async () => {
         const fn = pendingMessages.shift();
         try { await fn(); } catch (e) { console.error('Erreur file attente:', e.message); }
     }
+});
+
+// ================== GUILD JOIN / LEAVE ==================
+client.on('guildCreate', async (guild) => {
+    console.log(`[GUILD] Bot ajouté sur : ${guild.name} (${guild.id})`);
+    if (!cfg.guild_notifications) cfg.guild_notifications = [];
+    cfg.guild_notifications.unshift({
+        guildId: guild.id,
+        name: guild.name,
+        icon: guild.iconURL({ size: 64 }) || null,
+        memberCount: guild.memberCount,
+        joinedAt: Date.now(),
+        seen: false
+    });
+    // Garder seulement les 50 dernières notifs
+    if (cfg.guild_notifications.length > 50) cfg.guild_notifications = cfg.guild_notifications.slice(0, 50);
+    saveConfig(cfg);
+
+    // Notification DM à l'owner
+    try {
+        const owner = await client.users.fetch(OWNER_ID);
+        await owner.send({ embeds: [new EmbedBuilder()
+            .setTitle('🆕 Nouveau serveur !')
+            .setDescription(`Le bot vient d'être ajouté sur **${guild.name}**`)
+            .setColor(0x00FF6A)
+            .setThumbnail(guild.iconURL({ size: 64 }) || null)
+            .addFields(
+                { name: '🆔 Guild ID', value: guild.id, inline: true },
+                { name: '👥 Membres', value: String(guild.memberCount), inline: true }
+            )
+            .setFooter({ text: 'Gérer → Dashboard → Serveurs' })
+            .setTimestamp()
+        ]});
+    } catch(e) {}
+});
+
+client.on('guildDelete', (guild) => {
+    console.log(`[GUILD] Bot retiré de : ${guild.name} (${guild.id})`);
 });
 
 client.login(process.env.DISCORD_BOT_TOKEN);
