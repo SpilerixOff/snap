@@ -66,58 +66,66 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification d'un pseudo Snapchat (scraping page publique)
+// 2. Vérification pseudo Snapchat via snapcode (seule API publique fiable)
 app.get('/api/check-snapchat/:username', async (req, res) => {
     const username = req.params.username.trim().toLowerCase();
-    if (!username || username.length < 3) return res.status(400).json({ error: 'Pseudo trop court' });
+
+    // Validation format Snapchat : 3-15 chars, lettres/chiffres/tirets/points
+    if (!username || username.length < 3 || username.length > 15) {
+        return res.json({ exists: false, reason: 'format' });
+    }
+    if (!/^[a-z0-9][a-z0-9._-]*[a-z0-9]$/.test(username) && username.length > 2) {
+        return res.json({ exists: false, reason: 'format' });
+    }
 
     try {
-        const response = await axios.get(
-            `https://www.snapchat.com/add/${encodeURIComponent(username)}`,
-            {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                    'Accept': 'text/html,application/xhtml+xml',
-                    'Accept-Language': 'fr-FR,fr;q=0.9',
-                },
-                timeout: 8000,
-                maxRedirects: 5
-            }
-        );
+        // L'API snapcode retourne une image PNG.
+        // Pour un utilisateur réel avec un Bitmoji : image > ~8KB
+        // Pour un utilisateur sans Bitmoji (compte basique) : image ~3-7KB (ghost générique)
+        // Pour un pseudo inexistant : l'image est identique au ghost générique (~3KB)
+        // On compare donc la taille avec un pseudo connu inexistant.
+        const snapcodeUrl = `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240`;
 
-        const html = response.data;
+        const [realRes, fakeRes] = await Promise.all([
+            axios.get(snapcodeUrl, {
+                responseType: 'arraybuffer',
+                timeout: 7000,
+                headers: { 'User-Agent': 'Snapchat/12.64.0.65 (iPhone; iOS 16.0)' },
+                validateStatus: s => s < 500
+            }),
+            axios.get(
+                'https://app.snapchat.com/web/deeplink/snapcode?username=xyzabc99999notarealsnap&type=PNG&size=240',
+                {
+                    responseType: 'arraybuffer',
+                    timeout: 7000,
+                    headers: { 'User-Agent': 'Snapchat/12.64.0.65 (iPhone; iOS 16.0)' },
+                    validateStatus: s => s < 500
+                }
+            )
+        ]);
 
-        // Extraire l'avatar (og:image)
-        const avatarMatch = html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]+)"/i)
-                         || html.match(/content="([^"]+)"\s+(?:property|name)="og:image"/i);
+        if (realRes.status === 404) return res.json({ exists: false });
 
-        // Extraire le nom affiché (og:title)
-        const titleMatch = html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]+)"/i)
-                        || html.match(/content="([^"]+)"\s+(?:property|name)="og:title"/i);
+        const realSize = realRes.data.byteLength;
+        const fakeSize = fakeRes.data.byteLength;
 
-        const avatarUrl = avatarMatch ? avatarMatch[1] : null;
-        const rawTitle  = titleMatch  ? titleMatch[1]  : '';
+        console.log(`Snapcode size: ${username}=${realSize}B | fake=${fakeSize}B`);
 
-        // Si la page est la page d'accueil générique → pseudo inexistant
-        const isGeneric = !rawTitle || rawTitle.toLowerCase().includes('snapchat') && !rawTitle.toLowerCase().includes(username);
-        const looksLikeBitmoji = avatarUrl && (avatarUrl.includes('bitmoji') || avatarUrl.includes('snapchat'));
+        // Si la taille est strictement plus grande que le ghost fictif → utilisateur existant
+        const exists = realSize > fakeSize + 200;
 
-        if (looksLikeBitmoji && !isGeneric) {
-            // Nom affiché : retirer le suffixe " (@pseudo) | Snapchat"
-            const displayName = rawTitle.replace(/\s*\(@[^)]+\).*$/, '').replace(/\s*\|.*$/, '').trim() || username;
-            console.log(`✅ Snap trouvé: ${username} → ${displayName} | avatar: ${avatarUrl}`);
-            return res.json({ exists: true, username, displayName, avatarUrl });
+        if (exists) {
+            // Avatar : on utilise l'URL du snapcode directement comme photo de profil
+            const avatarUrl = `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240&bitmoji=enable`;
+            return res.json({ exists: true, username, displayName: username, avatarUrl });
         }
 
-        console.log(`❌ Snap non trouvé: ${username}`);
         res.json({ exists: false });
 
     } catch (err) {
-        if (err.response && err.response.status === 404) {
-            return res.json({ exists: false });
-        }
-        console.error('Erreur vérification Snapchat:', err.message);
-        res.json({ exists: false, error: 'Service indisponible' });
+        console.error('Erreur check Snapchat:', err.message);
+        // En cas d'erreur réseau, on ne bloque pas l'utilisateur
+        res.json({ exists: false, error: 'indisponible' });
     }
 });
 

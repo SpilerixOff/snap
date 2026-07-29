@@ -795,6 +795,7 @@
                     document.getElementById('snapProfileCard').classList.remove('visible');
                 }
             } catch (err) {
+                statusEl.className = 'snap-status';
                 statusEl.textContent = '';
                 console.error(err);
             }
