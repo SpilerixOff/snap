@@ -84,6 +84,20 @@ function hasSubscription(discordId) {
     return sub.active === true && (!sub.expiresAt || sub.expiresAt > Date.now());
 }
 
+// Serveur premium (accordé par l'owner via dashboard)
+function hasGuildPremium(guildId) {
+    if (!guildId) return false;
+    return !!(cfg.guild_premiums && cfg.guild_premiums[guildId]);
+}
+
+// Vérifie si un user/serveur peut accéder aux features premium
+function canUsePremium(userId, guildId) {
+    if (isOwner(userId)) return true;
+    if (hasSubscription(userId)) return true;
+    if (guildId && hasGuildPremium(guildId)) return true;
+    return false;
+}
+
 // Retourne une string lisible du type d'abonnement
 function getSubType(userId) {
     if (isOwner(userId)) return '👑 Owner (Premium ∞)';
@@ -141,6 +155,9 @@ const CONFIG_DEFAULTS = {
     // ---- Status embed ----
     status_channel_id:    '',   // ID du salon où poster le status live
     status_message_id:    '',   // ID du message status (pour l'éditer)
+
+    // ---- Serveurs sous contrôle owner ----
+    guild_premiums:       {},   // { guildId: { grantedAt: timestamp } }
 };
 
 function loadConfig() {
@@ -635,8 +652,44 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    // /stats — tout le monde peut voir
+    // /abonnement — tout le monde
+    if (interaction.commandName === 'abonnement') {
+        const userId = interaction.user.id;
+        let desc, color;
+        if (isOwner(userId)) {
+            desc = '👑 **Owner** — Accès Premium permanent et illimité.';
+            color = 0xFFFC00;
+        } else if (hasSubscription(userId)) {
+            const sub = subs[userId];
+            desc = '💎 **Premium actif**';
+            if (sub?.expiresAt) { const d = new Date(sub.expiresAt); desc += `\n📅 Expire le : **${d.toLocaleDateString('fr-FR')}**`; }
+            if (sub?.promoCode)  desc += `\n🎟️ Code utilisé : \`${sub.promoCode}\``;
+            if (sub?.stripeSubId) desc += '\n💳 Via Stripe';
+            color = 0x00FF6A;
+        } else {
+            desc = `🆓 **Gratuit** — Fonctionnalités limitées.\n\n💎 Obtiens **Premium** sur le dashboard :\n[${BASE_URL}/dashboard](${BASE_URL}/dashboard)`;
+            color = 0x888888;
+        }
+        if (interaction.guildId && hasGuildPremium(interaction.guildId) && !isOwner(userId)) {
+            desc += '\n\n🌐 Ce serveur bénéficie du Premium accordé par l\'owner du bot.';
+        }
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('💎 Mon abonnement')
+                .setDescription(desc)
+                .setColor(color)
+                .setFooter({ text: `Snap+ • ${interaction.user.username}` })
+                .setTimestamp()
+            ],
+            flags: 64
+        });
+    }
+
+    // /stats — premium ou owner seulement
     if (interaction.commandName === 'stats') {
+        if (!canUsePremium(interaction.user.id, interaction.guildId)) {
+            return interaction.reply({ content: '🔒 Commande réservée aux membres **Premium**. Utilise `/abonnement` pour en savoir plus.', flags: 64 });
+        }
         resetStatsIfNewDay();
         const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
         return interaction.reply({
@@ -1054,6 +1107,44 @@ app.post('/api/dashboard/blacklist/remove', requireAuth, (req, res) => {
     res.json({ ok: true });
 });
 
+// Détail d'un serveur (owner only)
+app.get('/api/dashboard/guilds/:id', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    if (!botReady) return res.status(503).json({ error: 'bot_not_ready' });
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ error: 'Serveur introuvable' });
+
+    const channels = [...guild.channels.cache.values()]
+        .map(c => ({ id: c.id, name: c.name, type: c.type, position: c.rawPosition, parentId: c.parentId || null }))
+        .sort((a, b) => a.position - b.position);
+
+    res.json({
+        id: guild.id, name: guild.name,
+        icon: guild.iconURL({ size: 128 }) || null,
+        memberCount: guild.memberCount,
+        ownerId: guild.ownerId,
+        ownerSub: getSubType(guild.ownerId),
+        hasPremium: hasGuildPremium(guild.id),
+        createdAt: guild.createdTimestamp,
+        channels
+    });
+});
+
+// Grant / revoke premium sur un serveur (owner only)
+app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const guildId = req.params.id;
+    const { grant } = req.body;
+    if (!cfg.guild_premiums) cfg.guild_premiums = {};
+    if (grant) {
+        cfg.guild_premiums[guildId] = { grantedAt: Date.now() };
+    } else {
+        delete cfg.guild_premiums[guildId];
+    }
+    saveConfig(cfg);
+    res.json({ ok: true, hasPremium: !!cfg.guild_premiums[guildId] });
+});
+
 // ================== STRIPE ==================
 
 // Créer une session de paiement Stripe Checkout
@@ -1130,7 +1221,8 @@ app.get('/api/dashboard/guilds', requireAuth, (req, res) => {
         id: g.id,
         name: g.name,
         memberCount: g.memberCount,
-        icon: g.iconURL({ size: 64 }) || null
+        icon: g.iconURL({ size: 64 }) || null,
+        premium: hasGuildPremium(g.id)
     }));
     res.json(guilds);
 });
@@ -1292,8 +1384,13 @@ client.once('ready', async () => {
                     .toJSON(),
 
                 new SlashCommandBuilder()
+                    .setName('abonnement')
+                    .setDescription('💎 Voir le statut de ton abonnement')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
                     .setName('stats')
-                    .setDescription('Voir les stats du jour')
+                    .setDescription('📊 Voir les stats du jour [PREMIUM]')
                     .toJSON(),
 
                 new SlashCommandBuilder()
@@ -1371,7 +1468,10 @@ client.once('ready', async () => {
                     .toJSON(),
         ];
 
-        // Enregistrer dans chaque serveur où le bot est présent (apparaissent immédiatement)
+        // Supprimer les anciennes global commands (évite les doublons)
+        await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+
+        // Enregistrer uniquement en guild commands (apparaissent immédiatement, pas de doublon)
         let registeredCount = 0;
         for (const [guildId] of client.guilds.cache) {
             try {
@@ -1381,8 +1481,6 @@ client.once('ready', async () => {
                 console.warn(`⚠️ Commands non enregistrées dans ${guildId}: ${e.message}`);
             }
         }
-        // Enregistrement global en fallback (pour les futurs serveurs)
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commandBody });
         console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (/dashboard, /setstatus, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)`);
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);

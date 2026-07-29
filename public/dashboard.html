@@ -281,15 +281,76 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
 .guild-card {
     background:var(--s2); border:1px solid var(--border); border-radius:12px;
     padding:16px; display:flex; align-items:center; gap:12px;
-    transition:border-color 0.2s, transform 0.15s;
+    transition:border-color 0.2s, transform 0.15s; position:relative;
 }
-.guild-card:hover { border-color:var(--border2); transform:translateY(-1px); }
+.guild-card.clickable { cursor:pointer; }
+.guild-card.clickable:hover { border-color:var(--y-border); transform:translateY(-2px); box-shadow:0 4px 20px rgba(255,252,0,0.08); }
+.guild-card .guild-premium-badge {
+    position:absolute; top:8px; right:8px;
+    background:linear-gradient(135deg,#FFFC00,#FFD700); color:#000;
+    font-size:9px; font-weight:800; padding:2px 7px; border-radius:20px;
+    letter-spacing:0.3px;
+}
 .guild-icon { width:44px; height:44px; border-radius:12px;
     background:var(--s3); display:flex; align-items:center; justify-content:center;
     font-size:18px; font-weight:800; color:var(--y); flex-shrink:0; overflow:hidden; }
 .guild-icon img { width:100%; height:100%; object-fit:cover; border-radius:12px; }
 .guild-name { font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .guild-members { font-size:11px; color:var(--muted2); margin-top:2px; }
+
+/* ─── GUILD MODAL ─── */
+.guild-modal-overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(6px);
+    z-index:900; display:none; align-items:center; justify-content:center; padding:16px;
+}
+.guild-modal-overlay.open { display:flex; animation:fadeIn 0.15s ease; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+.guild-modal {
+    background:var(--s1); border:1px solid var(--border2); border-radius:18px;
+    width:100%; max-width:620px; max-height:85vh; overflow:hidden;
+    display:flex; flex-direction:column; animation:slideUp 0.2s ease;
+}
+@keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:translateY(0);opacity:1} }
+.gm-header {
+    padding:20px; display:flex; align-items:center; gap:14px;
+    border-bottom:1px solid var(--border);
+    background:linear-gradient(135deg,rgba(255,252,0,0.03),transparent);
+}
+.gm-icon { width:56px; height:56px; border-radius:14px; background:var(--s3);
+    display:flex; align-items:center; justify-content:center;
+    font-size:22px; font-weight:800; color:var(--y); flex-shrink:0; overflow:hidden; }
+.gm-icon img { width:100%; height:100%; object-fit:cover; border-radius:14px; }
+.gm-title { font-size:17px; font-weight:800; }
+.gm-meta { font-size:12px; color:var(--muted2); margin-top:3px; }
+.gm-close { margin-left:auto; background:var(--s3); border:none; color:var(--muted2);
+    width:32px; height:32px; border-radius:8px; cursor:pointer; font-size:14px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+    transition:color 0.2s; }
+.gm-close:hover { color:var(--text); }
+.gm-body { overflow-y:auto; padding:20px; flex:1; }
+.gm-section { margin-bottom:20px; }
+.gm-section-title { font-size:11px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.8px; color:var(--muted); margin-bottom:10px; }
+.gm-info-row { display:flex; align-items:center; gap:8px; padding:8px 0;
+    border-bottom:1px solid var(--border); font-size:13px; }
+.gm-info-row:last-child { border-bottom:none; }
+.gm-info-label { color:var(--muted2); width:110px; flex-shrink:0; }
+.gm-info-value { font-weight:600; }
+.gm-premium-toggle {
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--s2); border:1px solid var(--border); border-radius:12px;
+    padding:14px 16px; margin-top:12px;
+}
+.gm-premium-toggle.active { border-color:var(--y-border); background:var(--y-glow); }
+.gm-premium-label { font-size:13px; font-weight:700; }
+.gm-premium-sub { font-size:11px; color:var(--muted2); margin-top:2px; }
+.channel-list { display:flex; flex-direction:column; gap:2px; }
+.ch-category { font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.8px; color:var(--muted); padding:8px 4px 4px; }
+.ch-item { display:flex; align-items:center; gap:8px; padding:5px 8px;
+    border-radius:6px; font-size:12px; color:var(--muted2); }
+.ch-item:hover { background:var(--s2); color:var(--text); }
+.ch-icon { width:16px; text-align:center; font-size:13px; flex-shrink:0; }
 
 /* ─── PROMO ─── */
 .promo-gen {
@@ -678,15 +739,102 @@ async function loadServers() {
         const list = await (await fetch('/api/dashboard/guilds')).json();
         if (!list.length) { el.innerHTML='<div class="card"><div class="empty"><i class="fas fa-server"></i>Aucun serveur trouvé</div></div>'; return; }
         el.innerHTML=`<div class="guilds-grid">${list.map(g=>`
-            <div class="guild-card">
+            <div class="guild-card${me.isOwner?' clickable':''}" ${me.isOwner?`onclick="showGuildDetail('${g.id}')"`:''}data-gid="${g.id}">
+                ${g.premium?'<div class="guild-premium-badge">PREMIUM</div>':''}
                 <div class="guild-icon">${g.icon?`<img src="${g.icon}" alt="">`:g.name[0].toUpperCase()}</div>
-                <div>
+                <div style="min-width:0">
                     <div class="guild-name">${x(g.name)}</div>
                     <div class="guild-members"><i class="fas fa-users" style="font-size:10px;margin-right:4px;color:var(--muted)"></i>${(g.memberCount||0).toLocaleString('fr-FR')} membres</div>
                 </div>
             </div>`).join('')}
         </div>`;
     } catch(e) { el.innerHTML='<div class="card" style="color:var(--err)">Erreur de chargement.</div>'; }
+}
+
+// ════════════════════════════════════════
+// GUILD DETAIL MODAL (owner only)
+// ════════════════════════════════════════
+const CH_ICONS = { 0:'#', 2:'🔊', 4:'', 5:'📢', 13:'🎤', 15:'💬' };
+
+async function showGuildDetail(guildId) {
+    const overlay = document.getElementById('guildModal');
+    overlay.classList.add('open');
+    document.getElementById('gModalBody').innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted2)"><i class="fas fa-spinner fa-spin"></i></div>';
+    document.getElementById('gModalName').textContent = 'Chargement...';
+    document.getElementById('gModalMeta').textContent = '';
+    document.getElementById('gModalIcon').innerHTML = '';
+
+    try {
+        const g = await (await fetch(`/api/dashboard/guilds/${guildId}`)).json();
+        if (g.error) throw new Error(g.error);
+
+        // Header
+        document.getElementById('gModalIcon').innerHTML = g.icon ? `<img src="${g.icon}" alt="">` : g.name[0].toUpperCase();
+        document.getElementById('gModalName').textContent = g.name;
+        document.getElementById('gModalMeta').textContent = `${(g.memberCount||0).toLocaleString('fr-FR')} membres • Créé le ${new Date(g.createdAt).toLocaleDateString('fr-FR')}`;
+
+        // Grouper les channels par catégorie
+        const cats = g.channels.filter(c => c.type === 4);
+        const noCat = g.channels.filter(c => c.type !== 4 && !c.parentId);
+        const grouped = [...noCat, ...cats.flatMap(cat => [cat, ...g.channels.filter(c => c.parentId === cat.id)])];
+
+        const chHtml = grouped.map(c => {
+            if (c.type === 4) return `<div class="ch-category">${x(c.name)}</div>`;
+            const icon = CH_ICONS[c.type] || '#';
+            return `<div class="ch-item"><span class="ch-icon">${icon}</span>${x(c.name)}</div>`;
+        }).join('');
+
+        const premiumActive = g.hasPremium;
+        document.getElementById('gModalBody').innerHTML = `
+            <div class="gm-section">
+                <div class="gm-section-title">Informations</div>
+                <div class="gm-info-row"><span class="gm-info-label">ID du serveur</span><span class="gm-info-value mono" style="font-size:12px">${g.id}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Propriétaire</span><span class="gm-info-value mono" style="font-size:12px">${g.ownerId}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Abonnement</span><span class="gm-info-value">${x(g.ownerSub)}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Membres</span><span class="gm-info-value">${(g.memberCount||0).toLocaleString('fr-FR')}</span></div>
+            </div>
+
+            <div class="gm-section">
+                <div class="gm-section-title">Contrôle Premium</div>
+                <div class="gm-premium-toggle ${premiumActive?'active':''}" id="gmPremiumBox">
+                    <div>
+                        <div class="gm-premium-label">${premiumActive?'💎 Premium accordé':'🆓 Accès gratuit'}</div>
+                        <div class="gm-premium-sub">${premiumActive?'Tu contrôles ce bot — le serveur a accès à toutes les features.':'Active le premium pour prendre le contrôle du bot dans ce serveur.'}</div>
+                    </div>
+                    <button class="btn ${premiumActive?'btn-err':'btn-y'}" id="gmPremiumBtn" onclick="toggleGuildPremium('${g.id}',${!premiumActive})">
+                        ${premiumActive?'<i class="fas fa-times"></i> Révoquer':'<i class="fas fa-crown"></i> Accorder premium'}
+                    </button>
+                </div>
+            </div>
+
+            <div class="gm-section">
+                <div class="gm-section-title">Salons (${g.channels.length})</div>
+                <div class="channel-list">${chHtml}</div>
+            </div>`;
+    } catch(e) {
+        document.getElementById('gModalBody').innerHTML = `<div style="color:var(--err);text-align:center;padding:30px">${e.message}</div>`;
+    }
+}
+
+async function toggleGuildPremium(guildId, grant) {
+    const btn = document.getElementById('gmPremiumBtn');
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/premium`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ grant })
+        })).json();
+        if (d.ok) {
+            toast(grant ? '💎 Premium accordé au serveur !' : 'Premium révoqué', grant ? 'ok' : 'err');
+            await showGuildDetail(guildId); // refresh
+            loadServers(); // refresh les cards
+        } else { toast(d.error||'Erreur','err'); btn.disabled=false; }
+    } catch(e) { toast('Erreur','err'); btn.disabled=false; }
+}
+
+function closeGuildModal(e) {
+    if (e && e.target !== document.getElementById('guildModal')) return;
+    document.getElementById('guildModal').classList.remove('open');
 }
 
 // ════════════════════════════════════════
@@ -1027,5 +1175,20 @@ function toggleSb(){ document.getElementById('sb').classList.toggle('open'); }
 init();
 setInterval(()=>{ if(cur==='home') loadHome(); if(cur==='requests') loadRequests(); }, 30000);
 </script>
+
+<!-- Guild Detail Modal -->
+<div id="guildModal" class="guild-modal-overlay" onclick="closeGuildModal(event)">
+    <div class="guild-modal">
+        <div class="gm-header">
+            <div class="gm-icon" id="gModalIcon"></div>
+            <div style="min-width:0">
+                <div class="gm-title" id="gModalName"></div>
+                <div class="gm-meta" id="gModalMeta"></div>
+            </div>
+            <button class="gm-close" onclick="document.getElementById('guildModal').classList.remove('open')"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="gm-body" id="gModalBody"></div>
+    </div>
+</div>
 </body>
 </html>
