@@ -1280,10 +1280,7 @@ client.once('ready', async () => {
             'ratelimit_minutes','timeout_minutes','delai_discord_sec'
         ];
 
-        // Guild commands = apparaissent IMMÉDIATEMENT (vs global = jusqu'à 1h)
-        const TARGET_GUILD_ID = '1532084326534090832';
-        await rest.put(Routes.applicationGuildCommands(client.user.id, TARGET_GUILD_ID), {
-            body: [
+        const commandBody = [
                 new SlashCommandBuilder()
                     .setName('dashboard')
                     .setDescription('🖥️ Accéder au dashboard web [OWNER ONLY]')
@@ -1372,9 +1369,21 @@ client.once('ready', async () => {
                         .setDescription('Remettre tous les paramètres par défaut')
                     )
                     .toJSON(),
-            ]
-        });
-        console.log('✅ Slash commands enregistrées (/dashboard, /setstatus, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)');
+        ];
+
+        // Enregistrer dans chaque serveur où le bot est présent (apparaissent immédiatement)
+        let registeredCount = 0;
+        for (const [guildId] of client.guilds.cache) {
+            try {
+                await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commandBody });
+                registeredCount++;
+            } catch(e) {
+                console.warn(`⚠️ Commands non enregistrées dans ${guildId}: ${e.message}`);
+            }
+        }
+        // Enregistrement global en fallback (pour les futurs serveurs)
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commandBody });
+        console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (/dashboard, /setstatus, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)`);
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
