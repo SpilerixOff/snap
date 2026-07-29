@@ -924,9 +924,10 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '🔒 Réservé aux serveurs avec un abonnement actif.', ephemeral: true });
         }
         const guildId = interaction.guildId;
-        const refLink = guildId && cfg.guild_channels && cfg.guild_channels[guildId]
+        const clientLink = guildId && cfg.guild_channels && cfg.guild_channels[guildId]
             ? `${BASE_URL}?ref=${guildId}`
             : BASE_URL;
+        const dashLink = `${BASE_URL}/dashboard`;
 
         await interaction.reply({ embeds: [
             new EmbedBuilder()
@@ -935,7 +936,8 @@ client.on('interactionCreate', async interaction => {
                 .setColor(0xFFFC00)
                 .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
                 .addFields(
-                    { name: '🔗 Lien du formulaire client', value: `[**Cliquer ici**](${refLink})\n\`${refLink}\``, inline: false },
+                    { name: '🖥️ Lien du dashboard', value: `[**Ouvrir le dashboard**](${dashLink})\n\`${dashLink}\``, inline: false },
+                    { name: '🔗 Lien formulaire client', value: `\`${clientLink}\``, inline: false },
                     { name: '⚙️ Fonctionnalités', value: '• Voir et gérer toutes les demandes\n• Accepter / refuser en un clic\n• Statistiques en temps réel\n• Configuration complète du bot', inline: false },
                     { name: '🚀 Comment ça marche ?', value: '1️⃣ Le client remplit le formulaire via le lien\n2️⃣ La demande arrive dans ce salon\n3️⃣ Tu cliques **Accepter** ou **Refuser**\n4️⃣ Le client reçoit la confirmation instantanément', inline: false }
                 )
