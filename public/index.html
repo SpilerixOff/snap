@@ -1024,7 +1024,7 @@
                 const res = await fetch('/api/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ snapchat, phone, operator })
+                    body: JSON.stringify({ snapchat, phone, operator, ref: REF_ID })
                 });
                 let data = {};
                 try { data = await res.json(); } catch(e) {}
@@ -1474,6 +1474,9 @@
                 }
             } catch(e) {}
         }
+
+        // Lire le ref depuis l'URL (?ref=GUILD_ID)
+        const REF_ID = new URLSearchParams(window.location.search).get('ref') || null;
 
         document.addEventListener('DOMContentLoaded', () => {
             updateProgressBar(0);

