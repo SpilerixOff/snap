@@ -685,6 +685,77 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
+    // /forfaits — tout le monde
+    if (interaction.commandName === 'forfaits') {
+        const PAYPAL_LINK = 'https://paypal.me/TON_PAYPAL'; // ← remplace par ton lien PayPal
+
+        const embed = new EmbedBuilder()
+            .setTitle('✨ Forfaits Snap+')
+            .setDescription('Accède aux fonctionnalités avancées du bot en choisissant un forfait.\nPaiement via **PayPal** — activation manuelle sous 24h.')
+            .setColor(0xFFFC00)
+            .addFields(
+                {
+                    name: '━━━━━━━━━━━━━━━━━━━━━━',
+                    value: '​',
+                    inline: false
+                },
+                {
+                    name: '🤖 Bot dans le serveur',
+                    value: [
+                        '> **3€ / mois**',
+                        '> ',
+                        '> ✅ Bot actif dans ton serveur',
+                        '> ✅ Commande `/abonnement`',
+                        '> ✅ Accès aux demandes Snap+',
+                        '> ❌ Stats & historique',
+                        '> ❌ Contrôle avancé',
+                    ].join('\n'),
+                    inline: true
+                },
+                {
+                    name: '💎 Premium',
+                    value: [
+                        '> **6€ / mois**',
+                        '> ',
+                        '> ✅ Tout le forfait Bot',
+                        '> ✅ `/stats` en temps réel',
+                        '> ✅ `/history` — historique complet',
+                        '> ✅ `/pending` — demandes en attente',
+                        '> ✅ Accès prioritaire & support',
+                    ].join('\n'),
+                    inline: true
+                },
+                {
+                    name: '━━━━━━━━━━━━━━━━━━━━━━',
+                    value: '​',
+                    inline: false
+                },
+                {
+                    name: '💳 Comment payer ?',
+                    value: `1. Clique sur le bouton **PayPal** ci-dessous\n2. Envoie le montant en indiquant ton **pseudo Discord** dans la note\n3. Ton accès est activé **sous 24h**`,
+                    inline: false
+                },
+            )
+            .setThumbnail('https://upload.wikimedia.org/wikipedia/fr/thumb/a/a9/Snapchat_logo.svg/800px-Snapchat_logo.svg.png')
+            .setFooter({ text: 'Snap+ Bot • Questions ? Contacte le propriétaire du bot' })
+            .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setLabel('Payer 3€ — Bot')
+                .setStyle(5) // LINK
+                .setEmoji('🤖')
+                .setURL(PAYPAL_LINK),
+            new ButtonBuilder()
+                .setLabel('Payer 6€ — Premium')
+                .setStyle(5)
+                .setEmoji('💎')
+                .setURL(PAYPAL_LINK),
+        );
+
+        return interaction.reply({ embeds: [embed], components: [row] });
+    }
+
     // /stats — premium ou owner seulement
     if (interaction.commandName === 'stats') {
         if (!canUsePremium(interaction.user.id, interaction.guildId)) {
@@ -1387,6 +1458,11 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('abonnement')
                     .setDescription('💎 Voir le statut de ton abonnement')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('forfaits')
+                    .setDescription('💰 Voir les forfaits et tarifs disponibles')
                     .toJSON(),
 
                 new SlashCommandBuilder()
