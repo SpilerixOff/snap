@@ -1313,9 +1313,15 @@ async function updateStatusEmbed() {
         const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
         const ping    = client.ws.ping;
 
-        // Abonnement du propriétaire du serveur
+        // Statut premium effectif du serveur
         const guild = client.guilds.cache.get(channel.guildId);
-        const subInfo = guild ? getSubType(guild.ownerId) : '—';
+        let subInfo = '🆓 Gratuit';
+        if (guild) {
+            if (isOwner(guild.ownerId)) subInfo = '👑 Owner';
+            else if (hasGuildPremium(guild.id)) subInfo = '💎 Premium (Owner accordé)';
+            else if (hasSubscription(guild.ownerId)) subInfo = getSubType(guild.ownerId);
+            else subInfo = '🆓 Gratuit';
+        }
 
         const embed = new EmbedBuilder()
             .setTitle('📡 Status — Live')
