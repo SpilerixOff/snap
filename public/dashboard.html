@@ -1664,15 +1664,22 @@ async function redeemPromo2() {
     const code=document.getElementById('redeemCode2').value.trim().toUpperCase();
     const msgEl=document.getElementById('redeemMsg2');
     if(!code) return;
+    msgEl.style.display='none';
     try {
-        const d=await (await fetch('/api/redeem-promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})).json();
+        const res=await fetch('/api/redeem-promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})});
+        if(res.status===401){ msgEl.style.display='block'; msgEl.style.color='var(--err)'; msgEl.textContent='Session expirée — reconnecte-toi.'; return; }
+        const d=await res.json();
         msgEl.style.display='block';
         if(d.ok){
-            msgEl.style.color='var(--ok)'; msgEl.textContent=`✓ Premium activé pour ${d.durationLabel||'une durée limitée'} !`;
-            toast('Premium activé !','ok'); me.isPremium=true;
+            const tierLabel = d.tier==='bot' ? '🤖 Bot' : '💎 Premium';
+            msgEl.style.color='var(--ok)'; msgEl.textContent=`✓ ${tierLabel} activé pour ${d.durationLabel||'une durée limitée'} !`;
+            toast(`${tierLabel} activé !`,'ok');
             setTimeout(()=>location.reload(),1500);
-        } else { msgEl.style.color='var(--err)'; msgEl.textContent=d.error; }
-    } catch(e) { msgEl.style.display='block'; msgEl.style.color='var(--err)'; msgEl.textContent='Erreur.'; }
+        } else {
+            const errMsg = d.error==='not_logged_in' ? 'Tu dois être connecté pour utiliser un code.' : d.error==='invalid_code' ? 'Code invalide ou expiré.' : d.error==='already_used' ? 'Tu as déjà utilisé ce code.' : d.error||'Code invalide.';
+            msgEl.style.color='var(--err)'; msgEl.textContent=errMsg;
+        }
+    } catch(e) { msgEl.style.display='block'; msgEl.style.color='var(--err)'; msgEl.textContent='Erreur réseau — réessaie.'; }
 }
 
 // ════════════════════════════════════════
