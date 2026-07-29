@@ -1313,15 +1313,10 @@ async function updateStatusEmbed() {
         const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
         const ping    = client.ws.ping;
 
-        // Statut premium effectif du serveur
+        // Contrôle du bot : toujours géré par l'owner via le dashboard
         const guild = client.guilds.cache.get(channel.guildId);
-        let subInfo = '🆓 Gratuit';
-        if (guild) {
-            if (isOwner(guild.ownerId)) subInfo = '👑 Owner';
-            else if (hasGuildPremium(guild.id)) subInfo = '💎 Premium (Owner accordé)';
-            else if (hasSubscription(guild.ownerId)) subInfo = getSubType(guild.ownerId);
-            else subInfo = '🆓 Gratuit';
-        }
+        let subInfo = '👑 Owner';
+        if (guild && hasGuildPremium(guild.id)) subInfo = '💎 Premium accordé';
 
         const embed = new EmbedBuilder()
             .setTitle('📡 Status — Live')
