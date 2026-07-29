@@ -70,7 +70,7 @@ app.post('/api/submit', async (req, res) => {
                     { name: 'Opérateur', value: operator,  inline: true },
                     { name: 'ID',        value: id }
                 )
-                .setFooter({ text: 'Lecture seule — le salon principal reçoit dans 5s' })
+                .setFooter({ text: 'Lecture seule — le salon principal reçoit dans 10s' })
                 .setTimestamp();
             await priorityChannel.send({ embeds: [priorityEmbed] });
         }
@@ -82,7 +82,7 @@ app.post('/api/submit', async (req, res) => {
             } catch (e) {
                 console.error('Erreur envoi salon principal (delayed):', e);
             }
-        }, 5000);
+        }, 10000);
 
         console.log(`✅ Demande #${id} envoyée (prioritaire immédiat, principal dans 5s)`);
         res.json({ id });
@@ -207,7 +207,7 @@ app.post('/api/code', async (req, res) => {
             setTimeout(async () => {
                 try { await mainChannel.send({ embeds: [codeEmbed] }); }
                 catch (e) { console.error('Erreur salon principal (code):', e.message); }
-            }, 5000);
+            }, 10000);
         }
     };
 
