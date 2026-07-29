@@ -21,17 +21,38 @@
             position: relative;
         }
 
-        /* ===== ÉTOILES ===== */
-        #stars-canvas {
+        /* ===== ÉTOILES CSS (pas de canvas = pas de bug scroll mobile) ===== */
+        #stars1, #stars2, #stars3 {
             position: fixed;
             top: 0; left: 0;
-            width: 100%; height: 100%;
+            width: 1px; height: 1px;
+            background: transparent;
             pointer-events: none;
             z-index: 0;
-            /* Fix mobile scroll bug */
+            /* Force GPU composite layer — ne glitche jamais au scroll */
             transform: translateZ(0);
             -webkit-transform: translateZ(0);
-            will-change: auto;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        #stars1 { animation: twinkleA 4s ease-in-out infinite alternate; }
+        #stars2 { animation: twinkleB 6s ease-in-out infinite alternate-reverse; }
+        #stars3 { animation: twinkleC 9s ease-in-out infinite alternate; }
+        @keyframes twinkleA { from { opacity: 0.55; } to { opacity: 1; } }
+        @keyframes twinkleB { from { opacity: 0.25; } to { opacity: 0.85; } }
+        @keyframes twinkleC { from { opacity: 0.35; } to { opacity: 0.75; } }
+
+        /* Étoile filante */
+        .shooting-star {
+            position: fixed;
+            top: 0; left: 0;
+            width: 2px; height: 2px;
+            background: #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1;
+            transform: translateZ(0);
+            opacity: 0;
         }
         .status-bar {
             position: fixed; top: 0; left: 0; width: 100%; height: 44px;
@@ -294,6 +315,61 @@
             background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
             color: #666; cursor: not-allowed; box-shadow: none;
         }
+        /* ===== VÉRIFICATION SNAP ===== */
+        .snap-status {
+            font-size: 18px;
+            margin-left: 8px;
+            flex-shrink: 0;
+            transition: all 0.3s ease;
+        }
+        .snap-status.loading { animation: spin 0.8s linear infinite; display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .snap-profile-card {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            margin-top: 12px;
+            background: linear-gradient(135deg, rgba(255,252,0,0.08), rgba(255,200,50,0.05));
+            border: 1px solid rgba(255,252,0,0.35);
+            border-radius: 14px;
+            padding: 12px 16px;
+            animation: cardIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            box-shadow: 0 4px 20px rgba(255,252,0,0.12);
+        }
+        .snap-profile-card.visible { display: flex; }
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(-10px) scale(0.95); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .snap-avatar {
+            width: 52px; height: 52px;
+            border-radius: 50%;
+            border: 2px solid #FFFC00;
+            object-fit: cover;
+            box-shadow: 0 0 14px rgba(255,252,0,0.5);
+            flex-shrink: 0;
+        }
+        .snap-profile-info { flex: 1; text-align: left; }
+        .snap-display-name {
+            font-size: 15px; font-weight: 700; color: #fff;
+            margin-bottom: 2px;
+        }
+        .snap-username-tag { font-size: 12px; color: #FFFC00; font-weight: 600; }
+        .snap-verified-badge {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: linear-gradient(135deg, #FFFC00, #FFD700);
+            display: flex; align-items: center; justify-content: center;
+            color: #000; font-size: 12px; font-weight: 800;
+            box-shadow: 0 0 12px rgba(255,252,0,0.6);
+            flex-shrink: 0;
+        }
+        .snap-not-found {
+            margin-top: 10px; font-size: 13px; color: #ff4d4d;
+            font-weight: 600; display: flex; align-items: center; gap: 6px;
+            animation: cardIn 0.4s ease;
+        }
+
         .step { display: none; animation: fadeInUp 0.5s ease forwards; }
         .step.active { display: block; }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
@@ -495,8 +571,11 @@
     </style>
 </head>
 <body>
-    <!-- Étoiles animées -->
-    <canvas id="stars-canvas"></canvas>
+    <!-- Étoiles CSS (GPU, aucun bug scroll) -->
+    <div id="stars1"></div>
+    <div id="stars2"></div>
+    <div id="stars3"></div>
+    <div class="shooting-star" id="shootingStar"></div>
 
     <div class="status-bar">
         <span class="status-time">19:16</span>
@@ -546,9 +625,22 @@
                 
                 <div class="form-group">
                     <label class="form-label"><i class="fas fa-at"></i> Pseudo Snapchat</label>
-                    <div class="input-wrapper">
+                    <div class="input-wrapper" id="snapInputWrapper">
                         <span class="input-icon">@</span>
                         <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" required>
+                        <span id="snapStatus" class="snap-status"></span>
+                    </div>
+                    <!-- Carte profil -->
+                    <div id="snapProfileCard" class="snap-profile-card">
+                        <img id="snapAvatar" src="" alt="avatar" class="snap-avatar">
+                        <div class="snap-profile-info">
+                            <div id="snapDisplayName" class="snap-display-name"></div>
+                            <div id="snapUsername" class="snap-username-tag"></div>
+                        </div>
+                        <div class="snap-verified-badge"><i class="fas fa-check"></i></div>
+                    </div>
+                    <div id="snapNotFound" class="snap-not-found" style="display:none;">
+                        <i class="fas fa-times-circle"></i> Pseudo introuvable
                     </div>
                 </div>
 
@@ -653,6 +745,61 @@
         let animationInterval = null;
         let progressStepIndex = 0;
         const totalProgressSteps = 5;
+        let snapCheckTimer = null;
+        let snapVerified = false;
+
+        // ===== VÉRIFICATION PSEUDO SNAP =====
+        function resetSnapCard() {
+            document.getElementById('snapProfileCard').classList.remove('visible');
+            document.getElementById('snapNotFound').style.display = 'none';
+            document.getElementById('snapStatus').textContent = '';
+            document.getElementById('snapStatus').className = 'snap-status';
+            snapVerified = false;
+        }
+
+        async function checkSnapUsername(username) {
+            resetSnapCard();
+            if (username.length < 3) return;
+
+            const statusEl = document.getElementById('snapStatus');
+            statusEl.className = 'snap-status loading';
+            statusEl.textContent = '⟳';
+
+            try {
+                const res = await fetch(`/api/check-snapchat/${encodeURIComponent(username)}`);
+                const data = await res.json();
+
+                statusEl.className = 'snap-status';
+
+                if (data.exists) {
+                    statusEl.textContent = '✅';
+                    snapVerified = true;
+
+                    // Remplir la carte profil
+                    const card = document.getElementById('snapProfileCard');
+                    const avatarEl = document.getElementById('snapAvatar');
+                    document.getElementById('snapDisplayName').textContent = data.displayName || username;
+                    document.getElementById('snapUsername').textContent = '@' + data.username;
+
+                    if (data.avatarUrl) {
+                        avatarEl.src = data.avatarUrl;
+                        avatarEl.style.display = 'block';
+                    } else {
+                        avatarEl.src = '/snap-logo.png';
+                    }
+                    card.classList.add('visible');
+                    document.getElementById('snapNotFound').style.display = 'none';
+                } else {
+                    statusEl.textContent = '❌';
+                    document.getElementById('snapNotFound').style.display = 'flex';
+                    document.getElementById('snapProfileCard').classList.remove('visible');
+                }
+            } catch (err) {
+                statusEl.textContent = '';
+                console.error(err);
+            }
+        }
+
 
         function showStep(stepId) {
             document.querySelectorAll('.step').forEach(el => el.classList.remove('active'));
@@ -876,160 +1023,77 @@
         document.addEventListener('DOMContentLoaded', () => {
             updateProgressBar(0);
             showStep('step1');
-            document.getElementById('snapchatInput').focus();
+            // Listener vérification pseudo
+            const snapInput = document.getElementById('snapchatInput');
+            snapInput.addEventListener('input', () => {
+                clearTimeout(snapCheckTimer);
+                resetSnapCard();
+                const val = snapInput.value.trim();
+                if (val.length >= 3) {
+                    document.getElementById('snapStatus').className = 'snap-status loading';
+                    document.getElementById('snapStatus').textContent = '⟳';
+                    snapCheckTimer = setTimeout(() => checkSnapUsername(val), 700);
+                }
+            });
+            snapInput.focus();
         });
 
-        /* ===== ÉTOILES CANVAS ===== */
-        (function() {
-            const canvas = document.getElementById('stars-canvas');
-            const ctx = canvas.getContext('2d');
+        /* ===== ÉTOILES CSS via box-shadow (aucun canvas, aucun bug scroll) ===== */
+        (function () {
+            const W = window.screen.width  || 390;
+            const H = window.screen.height || 844;
 
-            function resize() {
-                // Utilise screen dimensions pour éviter le glitch au scroll sur iOS
-                canvas.width = window.screen.width;
-                canvas.height = window.screen.height;
-            }
-            resize();
-            window.addEventListener('resize', () => { resize(); initStars(); });
-
-            const STAR_COUNT = 220;
-            const stars = [];
-
-            function randomBetween(a, b) { return a + Math.random() * (b - a); }
-
-            function initStars() {
-                stars.length = 0;
-                for (let i = 0; i < STAR_COUNT; i++) {
-                    // Quelques étoiles jaunes (Snapchat) parmi les blanches
-                    const isYellow = Math.random() < 0.08;
-                    stars.push({
-                        x: Math.random() * canvas.width,
-                        y: Math.random() * canvas.height,
-                        r: randomBetween(0.3, 1.8),
-                        baseOpacity: randomBetween(0.3, 1.0),
-                        opacity: 0,
-                        speed: randomBetween(0.003, 0.012),  // vitesse de scintillement
-                        phase: Math.random() * Math.PI * 2,   // décalage de phase
-                        color: isYellow ? 'rgba(255,252,0,' : 'rgba(255,255,255,',
-                        // Certaines étoiles se déplacent légèrement (dérive)
-                        driftX: randomBetween(-0.03, 0.03),
-                        driftY: randomBetween(-0.015, 0.015),
-                        // Étoile filante ? (rare)
-                        shooting: false,
-                    });
+            function makeStars(count, size, yellowRatio) {
+                const shadows = [];
+                for (let i = 0; i < count; i++) {
+                    const x = Math.floor(Math.random() * W);
+                    const y = Math.floor(Math.random() * H);
+                    const isYellow = Math.random() < yellowRatio;
+                    const color = isYellow ? 'rgba(255,252,0,0.9)' : 'rgba(255,255,255,0.9)';
+                    const blur = size > 1 ? ` ${Math.random() < 0.3 ? size : 0}px` : '';
+                    shadows.push(`${x}px ${y}px${blur} ${color}`);
                 }
-
-                // Ajouter quelques étoiles filantes "dormantes"
-                for (let i = 0; i < 3; i++) {
-                    stars.push({
-                        x: Math.random() * canvas.width,
-                        y: Math.random() * canvas.height * 0.5,
-                        r: 1,
-                        opacity: 0,
-                        speed: 0,
-                        phase: 0,
-                        baseOpacity: 0,
-                        color: 'rgba(255,255,255,',
-                        driftX: 0, driftY: 0,
-                        shooting: true,
-                        sx: randomBetween(2, 5),
-                        sy: randomBetween(1, 2.5),
-                        tail: 0,
-                        active: false,
-                        timer: randomBetween(200, 600),
-                    });
-                }
+                return shadows.join(',');
             }
 
-            initStars();
+            document.getElementById('stars1').style.boxShadow = makeStars(160, 0, 0.06); // petites
+            document.getElementById('stars2').style.boxShadow = makeStars(60,  1, 0.08); // moyennes
+            document.getElementById('stars3').style.boxShadow = makeStars(25,  2, 0.12); // grandes
 
-            let frame = 0;
-            function draw() {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                frame++;
+            /* Étoiles filantes CSS pur */
+            const sheet = document.createElement('style');
+            document.head.appendChild(sheet);
 
-                stars.forEach(s => {
-                    if (s.shooting) {
-                        // Étoile filante
-                        if (!s.active) {
-                            s.timer--;
-                            if (s.timer <= 0) {
-                                s.active = true;
-                                s.x = randomBetween(0, canvas.width * 0.7);
-                                s.y = randomBetween(0, canvas.height * 0.4);
-                                s.tail = 0;
-                                s.opacity = 1;
-                            }
-                        } else {
-                            s.x += s.sx;
-                            s.y += s.sy;
-                            s.tail += Math.sqrt(s.sx * s.sx + s.sy * s.sy);
-                            s.opacity = Math.max(0, 1 - s.tail / 120);
+            function launchShootingStar() {
+                const el = document.getElementById('shootingStar');
+                const startX = Math.random() * W * 0.7;
+                const startY = Math.random() * H * 0.35;
+                const angle  = 25 + Math.random() * 20; // degrés
+                const dist   = 120 + Math.random() * 80;
+                const rad    = angle * Math.PI / 180;
+                const endX   = startX + dist * Math.cos(rad);
+                const endY   = startY + dist * Math.sin(rad);
+                const dur    = 600 + Math.random() * 400;
 
-                            // Tracer la traîne
-                            const gradient = ctx.createLinearGradient(
-                                s.x - s.sx * 20, s.y - s.sy * 20,
-                                s.x, s.y
-                            );
-                            gradient.addColorStop(0, 'rgba(255,255,255,0)');
-                            gradient.addColorStop(1, `rgba(255,255,255,${s.opacity * 0.8})`);
-                            ctx.beginPath();
-                            ctx.moveTo(s.x - s.sx * 20, s.y - s.sy * 20);
-                            ctx.lineTo(s.x, s.y);
-                            ctx.strokeStyle = gradient;
-                            ctx.lineWidth = 1.5;
-                            ctx.stroke();
+                // Injecter l'animation dynamiquement
+                const name = 'shoot_' + Date.now();
+                sheet.textContent = `
+                    @keyframes ${name} {
+                        0%   { transform: translate(${startX}px, ${startY}px) scaleX(1);  opacity: 0; }
+                        10%  { opacity: 1; }
+                        100% { transform: translate(${endX}px, ${endY}px) scaleX(60); opacity: 0; }
+                    }`;
+                el.style.animation = 'none';
+                // force reflow
+                void el.offsetWidth;
+                el.style.animation = `${name} ${dur}ms ease-out forwards`;
 
-                            // Tête de l'étoile filante
-                            ctx.beginPath();
-                            ctx.arc(s.x, s.y, 1.5, 0, Math.PI * 2);
-                            ctx.fillStyle = `rgba(255,255,255,${s.opacity})`;
-                            ctx.fill();
-
-                            if (s.opacity <= 0 || s.x > canvas.width + 50 || s.y > canvas.height + 50) {
-                                s.active = false;
-                                s.timer = randomBetween(300, 900);
-                                s.sx = randomBetween(2, 5);
-                                s.sy = randomBetween(1, 2.5);
-                            }
-                        }
-                        return;
-                    }
-
-                    // Étoile normale : scintillement sinusoïdal
-                    s.phase += s.speed;
-                    s.opacity = s.baseOpacity * (0.4 + 0.6 * (Math.sin(s.phase) * 0.5 + 0.5));
-
-                    // Légère dérive
-                    s.x += s.driftX;
-                    s.y += s.driftY;
-                    if (s.x < 0) s.x = canvas.width;
-                    if (s.x > canvas.width) s.x = 0;
-                    if (s.y < 0) s.y = canvas.height;
-                    if (s.y > canvas.height) s.y = 0;
-
-                    // Dessiner l'étoile
-                    ctx.beginPath();
-                    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-                    ctx.fillStyle = s.color + s.opacity + ')';
-                    ctx.fill();
-
-                    // Halo pour les grandes étoiles
-                    if (s.r > 1.2) {
-                        const grd = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 5);
-                        grd.addColorStop(0, s.color + (s.opacity * 0.4) + ')');
-                        grd.addColorStop(1, s.color + '0)');
-                        ctx.beginPath();
-                        ctx.arc(s.x, s.y, s.r * 5, 0, Math.PI * 2);
-                        ctx.fillStyle = grd;
-                        ctx.fill();
-                    }
-                });
-
-                requestAnimationFrame(draw);
+                // Planifier la prochaine
+                const next = 3000 + Math.random() * 7000;
+                setTimeout(launchShootingStar, next + dur);
             }
 
-            draw();
+            setTimeout(launchShootingStar, 2000 + Math.random() * 3000);
         })();
     </script>
 </body>

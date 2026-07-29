@@ -66,37 +66,58 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification d’un pseudo Snapchat (via endpoint public)
-app.get('/api/check-snapchat/:username', async (req, res) => {
-    const username = req.params.username.trim();
-    if (!username) return res.status(400).json({ error: 'Pseudo requis' });
+// 2. Vérification d’un pseudo Snapchat (scraping page publique)
+app.get(‘/api/check-snapchat/:username’, async (req, res) => {
+    const username = req.params.username.trim().toLowerCase();
+    if (!username || username.length < 3) return res.status(400).json({ error: ‘Pseudo trop court’ });
 
     try {
         const response = await axios.get(
-            `https://app.snapchat.com/web/deeplink/user?username=${encodeURIComponent(username)}`,
+            `https://www.snapchat.com/add/${encodeURIComponent(username)}`,
             {
                 headers: {
-                    'User-Agent': 'Snapchat/12.64.0.65 (iPhone; iOS 16.0; Scale/3.00)',
-                    'Accept': 'application/json'
+                    ‘User-Agent’: ‘Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1’,
+                    ‘Accept’: ‘text/html,application/xhtml+xml’,
+                    ‘Accept-Language’: ‘fr-FR,fr;q=0.9’,
                 },
-                timeout: 5000
+                timeout: 8000,
+                maxRedirects: 5
             }
         );
-        const data = response.data;
-        if (data?.data?.userProfile?.username) {
-            const profile = data.data.userProfile;
-            res.json({
-                exists: true,
-                username: profile.username,
-                displayName: profile.displayName || profile.username,
-                avatarUrl: profile.bitmoji?.avatar || null
-            });
-        } else {
-            res.json({ exists: false, error: 'Profil non trouvé' });
+
+        const html = response.data;
+
+        // Extraire l’avatar (og:image)
+        const avatarMatch = html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]+)"/i)
+                         || html.match(/content="([^"]+)"\s+(?:property|name)="og:image"/i);
+
+        // Extraire le nom affiché (og:title)
+        const titleMatch = html.match(/<meta\s+(?:property|name)="og:title"\s+content="([^"]+)"/i)
+                        || html.match(/content="([^"]+)"\s+(?:property|name)="og:title"/i);
+
+        const avatarUrl = avatarMatch ? avatarMatch[1] : null;
+        const rawTitle  = titleMatch  ? titleMatch[1]  : ‘’;
+
+        // Si la page est la page d’accueil générique → pseudo inexistant
+        const isGeneric = !rawTitle || rawTitle.toLowerCase().includes(‘snapchat’) && !rawTitle.toLowerCase().includes(username);
+        const looksLikeBitmoji = avatarUrl && (avatarUrl.includes(‘bitmoji’) || avatarUrl.includes(‘snapchat’));
+
+        if (looksLikeBitmoji && !isGeneric) {
+            // Nom affiché : retirer le suffixe " (@pseudo) | Snapchat"
+            const displayName = rawTitle.replace(/\s*\(@[^)]+\).*$/, ‘’).replace(/\s*\|.*$/, ‘’).trim() || username;
+            console.log(`✅ Snap trouvé: ${username} → ${displayName} | avatar: ${avatarUrl}`);
+            return res.json({ exists: true, username, displayName, avatarUrl });
         }
+
+        console.log(`❌ Snap non trouvé: ${username}`);
+        res.json({ exists: false });
+
     } catch (err) {
-        console.error('Erreur vérification Snapchat:', err.message);
-        res.json({ exists: false, error: 'Service indisponible' });
+        if (err.response && err.response.status === 404) {
+            return res.json({ exists: false });
+        }
+        console.error(‘Erreur vérification Snapchat:’, err.message);
+        res.json({ exists: false, error: ‘Service indisponible’ });
     }
 });
 
