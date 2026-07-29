@@ -929,6 +929,7 @@ async function lgGenerate() {
 // ════════════════════════════════════════
 async function loadServers() {
     const el = document.getElementById('serversContent');
+    el.innerHTML = ''; // reset pour éviter les doublons
     const lgenCard = document.getElementById('linkGenCard');
     if (!me.isPremium && !me.isOwner && !me.isBotTier) { el.innerHTML=gate(); if(lgenCard) lgenCard.style.display='none'; return; }
 
@@ -1022,12 +1023,12 @@ async function loadServers() {
                     <div class="guild-members"><i class="fas fa-users" style="font-size:10px;margin-right:4px;color:var(--muted)"></i>${(g.memberCount||0).toLocaleString('fr-FR')} membres</div>
                     ${g.refLink?`<div style="font-size:10px;color:var(--y);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="fas fa-link" style="margin-right:3px"></i>Lien configuré</div>`:'<div style="font-size:10px;color:var(--muted);margin-top:3px">Pas de lien</div>'}
                 </div>
-                <div onclick="event.stopPropagation()" style="position:absolute;top:8px;right:8px;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+                <div onclick="event.stopPropagation()" style="position:absolute;top:8px;right:8px;display:flex;align-items:center;gap:6px">
+                    <button class="btn" title="Rejoindre ce serveur" style="font-size:11px;padding:4px 10px;background:var(--bg3);border:1px solid var(--border);color:var(--text)" onclick="getGuildInvite('${g.id}',this)"><i class="fas fa-sign-in-alt"></i> Join</button>
                     <label class="toggle" style="margin:0" title="${g.disabled?'Réactiver':'Désactiver'} le serveur">
                         <input type="checkbox" ${g.disabled?'':'checked'} onchange="toggleGuild('${g.id}',this)">
                         <span class="toggle-slider"></span>
                     </label>
-                    <button class="btn" title="Rejoindre ce serveur" style="font-size:10px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border)" onclick="getGuildInvite('${g.id}',this)"><i class="fas fa-sign-in-alt"></i></button>
                 </div>
             </div>`).join('')}
         </div>`;
