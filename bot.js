@@ -795,6 +795,64 @@ client.on('interactionCreate', async interaction => {
         return;
     }
 
+    // /install — guide d'installation pour nouveaux serveurs
+    if (interaction.commandName === 'install') {
+        const clientId = DISCORD_CLIENT_ID || (client.user ? client.user.id : null);
+        const inviteLink = clientId
+            ? `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=2147609600&scope=bot%20applications.commands`
+            : null;
+
+        const embeds = [
+            new EmbedBuilder()
+                .setTitle('🚀 Installation — Snap+ Bot')
+                .setDescription('Suis ces étapes pour intégrer le bot Snap+ sur ton serveur et recevoir les demandes directement chez toi.')
+                .setColor(0xFFFC00)
+                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                .setTimestamp(),
+
+            new EmbedBuilder()
+                .setTitle('① Invite le bot sur ton serveur')
+                .setColor(0x5865F2)
+                .setDescription(
+                    inviteLink
+                        ? `Clique sur le lien ci-dessous pour inviter **Snap+** sur ton serveur Discord :\n\n🔗 [**Inviter le bot**](${inviteLink})\n\n> Le bot a besoin des permissions d'envoi de messages et de gestion des interactions.`
+                        : '⚠️ Lien d\'invitation indisponible — contacte l\'owner.'
+                ),
+
+            new EmbedBuilder()
+                .setTitle('② Configure le salon de réception')
+                .setColor(0x00B0F4)
+                .setDescription(
+                    '**Va dans le salon où tu veux recevoir les demandes** et tape :\n\n```\n/setchannel\n```\n\n> Le bot va enregistrer ce salon et générer **ton lien unique**.\n> Seuls les admins avec un abonnement actif peuvent utiliser cette commande.'
+                ),
+
+            new EmbedBuilder()
+                .setTitle('③ Récupère ton lien unique')
+                .setColor(0x00FF6A)
+                .setDescription(
+                    'Après `/setchannel`, le bot t\'envoie un message avec ton **lien personnalisé** :\n\n```\nhttps://snap-ivh7.onrender.com?ref=TON_GUILD_ID\n```\n\n> Ce lien est unique à ton serveur.\n> Toutes les demandes faites via ce lien arriveront **directement dans ton salon**.'
+                ),
+
+            new EmbedBuilder()
+                .setTitle('④ Partage le lien')
+                .setColor(0xFF6B6B)
+                .setDescription(
+                    'Envoie ce lien à tes clients. Ils remplissent le formulaire et la demande arrive chez toi avec :\n\n✅ **Bouton Accepter** — active l\'abonnement Snap+\n❌ **Bouton Refuser** — rejette la demande\n📲 **Bouton Renvoyer SMS** — redemande le code'
+                ),
+
+            new EmbedBuilder()
+                .setTitle('⑤ Gère les demandes')
+                .setColor(0xFFA500)
+                .setDescription(
+                    'Quand une demande arrive dans ton salon :\n\n> 1. Clique **Accepter** → le client reçoit la confirmation\n> 2. Clique **Refuser** → la demande est annulée\n> 3. Les demandes expirent automatiquement après **5 minutes** sans réponse\n\n💡 **Conseil :** crée un salon privé uniquement pour toi et tes mods pour éviter que les membres voient les demandes.'
+                )
+                .setFooter({ text: 'Snap+ Bot • Besoin d\'aide ? Contacte l\'owner.' }),
+        ];
+
+        await interaction.reply({ embeds, ephemeral: false });
+        return;
+    }
+
     // /setchannel — requiert premium sur le serveur OU owner
     if (interaction.commandName === 'setchannel') {
         const guildId = interaction.guildId;
@@ -1963,6 +2021,11 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('guide')
                     .setDescription('📖 Guide complet — comment utiliser le bot Snap+')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('install')
+                    .setDescription('🚀 Guide d\'installation — ajouter le bot sur un nouveau serveur')
                     .toJSON(),
 
                 new SlashCommandBuilder()
