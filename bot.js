@@ -205,34 +205,56 @@ async function saveGuildChannels() {
     }
     try {
         const https = require('https');
-        const body  = JSON.stringify([{ key: 'GUILD_CHANNELS', value: json }]);
-        await new Promise((resolve, reject) => {
-            const req = https.request({
-                hostname: 'api.render.com',
-                path: `/v1/services/${serviceId}/env-vars`,
-                method: 'PUT',
-                headers: {
-                    'Authorization': `Bearer ${apiKey}`,
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(body),
-                },
-            }, res => {
+
+        // Fonction helper pour les requêtes HTTPS
+        const httpsRequest = (options, body = null) => new Promise((resolve, reject) => {
+            const req = https.request(options, res => {
                 let data = '';
                 res.on('data', d => data += d);
-                res.on('end', () => {
-                    if (res.statusCode === 200) {
-                        console.log(`[GUILD_CHANNELS] ✅ Render env var mise à jour automatiquement`);
-                        resolve();
-                    } else {
-                        console.error(`[GUILD_CHANNELS] ❌ Render API erreur ${res.statusCode}: ${data}`);
-                        resolve();
-                    }
-                });
+                res.on('end', () => resolve({ status: res.statusCode, body: data }));
             });
             req.on('error', reject);
-            req.write(body);
+            if (body) req.write(body);
             req.end();
         });
+
+        // 1. Récupérer TOUTES les variables existantes
+        const getRes = await httpsRequest({
+            hostname: 'api.render.com',
+            path: `/v1/services/${serviceId}/env-vars`,
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${apiKey}` },
+        });
+
+        let existingVars = [];
+        if (getRes.status === 200) {
+            try {
+                existingVars = JSON.parse(getRes.body).map(v => ({ key: v.envVar?.key || v.key, value: v.envVar?.value || v.value }));
+            } catch(e) {}
+        }
+
+        // 2. Mettre à jour ou ajouter GUILD_CHANNELS sans toucher aux autres
+        const merged = existingVars.filter(v => v.key && v.key !== 'GUILD_CHANNELS');
+        merged.push({ key: 'GUILD_CHANNELS', value: json });
+
+        // 3. PUT avec la liste complète
+        const putBody = JSON.stringify(merged);
+        const putRes = await httpsRequest({
+            hostname: 'api.render.com',
+            path: `/v1/services/${serviceId}/env-vars`,
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(putBody),
+            },
+        }, putBody);
+
+        if (putRes.status === 200) {
+            console.log(`[GUILD_CHANNELS] ✅ Render env var mise à jour (${merged.length} vars total)`);
+        } else {
+            console.error(`[GUILD_CHANNELS] ❌ Render API erreur ${putRes.status}: ${putRes.body}`);
+        }
     } catch(e) {
         console.error('[GUILD_CHANNELS] Erreur Render API:', e.message);
     }
