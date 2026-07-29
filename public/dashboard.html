@@ -548,6 +548,45 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
         <div id="s-servers" class="section">
             <div class="page-title">Serveurs Discord</div>
             <div class="page-sub">Serveurs sur lesquels le bot est actuellement connecté.</div>
+
+            <!-- Générateur de lien rapide -->
+            <div class="card" style="margin-bottom:16px" id="linkGenCard">
+                <div class="card-header">
+                    <div class="card-title"><i class="fas fa-link"></i> Générer un lien client</div>
+                </div>
+                <div style="padding:16px">
+                    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+                        Génère le lien unique à envoyer à ton client. Sélectionne son serveur, puis entre l'ID du salon où les demandes doivent arriver.
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
+                        <div>
+                            <div style="font-size:11px;color:var(--muted);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">Serveur</div>
+                            <select class="form-input" id="lgGuild" onchange="lgLoadChannels()" style="width:100%">
+                                <option value="">— Choisir un serveur —</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div style="font-size:11px;color:var(--muted);margin-bottom:5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">ID du salon <span style="font-weight:400;opacity:.6">(ou sélectionne)</span></div>
+                            <div style="display:flex;gap:6px">
+                                <select class="form-input" id="lgChannelSelect" onchange="lgSyncInput()" style="flex:1">
+                                    <option value="">— Salon —</option>
+                                </select>
+                                <input class="form-input" id="lgChannelId" placeholder="ou colle l'ID…" style="flex:1" oninput="lgSyncSelect()">
+                            </div>
+                        </div>
+                        <button class="btn btn-y" onclick="lgGenerate()" style="height:38px;padding:0 18px"><i class="fas fa-link"></i> Générer</button>
+                    </div>
+                    <div id="lgResult" style="display:none;margin-top:14px;background:var(--bg2);border-radius:8px;padding:14px">
+                        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.5px">🔗 Lien unique généré</div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <code id="lgLink" style="flex:1;background:var(--bg3,#111);padding:8px 12px;border-radius:6px;font-size:12px;word-break:break-all;color:var(--y)"></code>
+                            <button class="btn btn-y" onclick="navigator.clipboard.writeText(document.getElementById('lgLink').textContent).then(()=>toast('Lien copié !','ok'))" style="flex-shrink:0"><i class="fas fa-copy"></i></button>
+                        </div>
+                        <div id="lgMeta" style="font-size:11px;color:var(--muted);margin-top:8px"></div>
+                    </div>
+                </div>
+            </div>
+
             <div id="serversContent"></div>
         </div>
 
@@ -768,6 +807,76 @@ async function loadRequests() {
 }
 
 // ════════════════════════════════════════
+// ════════════════════════════════════════
+// LINK GENERATOR
+// ════════════════════════════════════════
+let _lgGuilds = []; // cache des guilds chargées
+
+async function lgInit(guilds) {
+    _lgGuilds = guilds;
+    const sel = document.getElementById('lgGuild');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— Choisir un serveur —</option>' +
+        guilds.map(g => `<option value="${g.id}">${g.name}${g.premium ? ' 💎' : ''}</option>`).join('');
+}
+
+async function lgLoadChannels() {
+    const guildId = document.getElementById('lgGuild').value;
+    const chSel = document.getElementById('lgChannelSelect');
+    document.getElementById('lgResult').style.display = 'none';
+    chSel.innerHTML = '<option value="">— Chargement… —</option>';
+    if (!guildId) { chSel.innerHTML = '<option value="">— Salon —</option>'; return; }
+    try {
+        const g = await (await fetch(`/api/dashboard/guilds/${guildId}`)).json();
+        const textChannels = (g.channels || []).filter(c => c.type === 0);
+        chSel.innerHTML = '<option value="">— Choisir un salon —</option>' +
+            textChannels.map(c => `<option value="${c.id}">#${c.name}</option>`).join('');
+        // Pré-remplir si canal déjà configuré
+        if (g.channelId) {
+            chSel.value = g.channelId;
+            document.getElementById('lgChannelId').value = g.channelId;
+        }
+    } catch(e) { chSel.innerHTML = '<option value="">— Erreur —</option>'; }
+}
+
+function lgSyncInput() {
+    const v = document.getElementById('lgChannelSelect').value;
+    if (v) document.getElementById('lgChannelId').value = v;
+}
+
+function lgSyncSelect() {
+    const v = document.getElementById('lgChannelId').value.trim();
+    const sel = document.getElementById('lgChannelSelect');
+    if ([...sel.options].some(o => o.value === v)) sel.value = v;
+    else sel.value = '';
+}
+
+async function lgGenerate() {
+    const guildId   = document.getElementById('lgGuild').value;
+    const channelId = document.getElementById('lgChannelId').value.trim()
+                   || document.getElementById('lgChannelSelect').value;
+
+    if (!guildId)   return toast('Sélectionne un serveur', 'err');
+    if (!channelId) return toast('Entre ou sélectionne un ID de salon', 'err');
+
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/channel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId })
+        })).json();
+
+        if (!d.ok) return toast(d.error || 'Erreur', 'err');
+
+        const link = d.link;
+        document.getElementById('lgLink').textContent = link;
+        document.getElementById('lgMeta').innerHTML =
+            `Serveur : <strong>${_lgGuilds.find(g=>g.id===guildId)?.name || guildId}</strong> · Canal ID : <code>${channelId}</code> · Sauvegardé ✅`;
+        document.getElementById('lgResult').style.display = 'block';
+        toast('Lien généré et sauvegardé !', 'ok');
+    } catch(e) { toast('Erreur', 'err'); }
+}
+
 // SERVERS
 // ════════════════════════════════════════
 async function loadServers() {
@@ -775,6 +884,7 @@ async function loadServers() {
     if (!me.isPremium) { el.innerHTML=gate(); return; }
     try {
         const list = await (await fetch('/api/dashboard/guilds')).json();
+        lgInit(list); // initialise le générateur de lien
         if (!list.length) { el.innerHTML='<div class="card"><div class="empty"><i class="fas fa-server"></i>Aucun serveur trouvé</div></div>'; return; }
         el.innerHTML=`<div class="guilds-grid">${list.map(g=>`
             <div class="guild-card${me.isOwner?' clickable':''}" ${me.isOwner?`onclick="showGuildDetail('${g.id}')"`:''}data-gid="${g.id}">
@@ -860,6 +970,40 @@ async function showGuildDetail(guildId) {
 
             <div class="gm-section">
                 <div class="gm-section-title" style="display:flex;justify-content:space-between;align-items:center">
+                    📎 Lien unique de partage
+                </div>
+                ${g.refLink ? `
+                <div style="background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:8px">
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">Le client partage ce lien — les demandes arrivent dans son salon configuré.</div>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <code style="flex:1;background:var(--bg3,#111);padding:6px 10px;border-radius:6px;font-size:11px;word-break:break-all;color:var(--y)">${g.refLink}</code>
+                        <button class="btn btn-y" style="font-size:11px;padding:4px 10px;flex-shrink:0" onclick="navigator.clipboard.writeText('${g.refLink}').then(()=>toast('Lien copié !','ok'))"><i class="fas fa-copy"></i></button>
+                    </div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:6px">Canal configuré : <code style="color:var(--green)">#${g.channelId}</code></div>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <select class="form-input" id="gmChannelSelect" style="flex:1;padding:4px 8px;font-size:12px">
+                        <option value="">— Changer de salon —</option>
+                        ${g.channels.filter(c=>c.type===0).map(c=>`<option value="${c.id}" ${c.id===g.channelId?'selected':''}>#${c.name}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-y" style="font-size:11px;padding:4px 10px" onclick="setGuildChannel('${g.id}')"><i class="fas fa-save"></i></button>
+                    <button class="btn btn-err" style="font-size:11px;padding:4px 10px" onclick="setGuildChannel('${g.id}',true)" title="Supprimer le canal"><i class="fas fa-trash"></i></button>
+                </div>` : `
+                <div style="background:var(--bg2);border-radius:8px;padding:14px;text-align:center">
+                    <div style="color:var(--muted);font-size:13px;margin-bottom:10px">Aucun canal configuré pour ce serveur.</div>
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Le client doit utiliser <code>/setchannel</code> dans son serveur, ou tu peux choisir un salon ici :</div>
+                    <div style="display:flex;gap:8px;justify-content:center">
+                        <select class="form-input" id="gmChannelSelect" style="width:220px;padding:4px 8px;font-size:12px">
+                            <option value="">— Choisir un salon —</option>
+                            ${g.channels.filter(c=>c.type===0).map(c=>`<option value="${c.id}">#${c.name}</option>`).join('')}
+                        </select>
+                        <button class="btn btn-y" style="font-size:11px;padding:4px 12px" onclick="setGuildChannel('${g.id}')"><i class="fas fa-link"></i> Générer le lien</button>
+                    </div>
+                </div>`}
+            </div>
+
+            <div class="gm-section">
+                <div class="gm-section-title" style="display:flex;justify-content:space-between;align-items:center">
                     Configuration du bot
                     <button class="btn btn-y" style="font-size:11px;padding:4px 12px" onclick="saveAllGuildCfg()"><i class="fas fa-save"></i> Sauvegarder</button>
                 </div>
@@ -890,6 +1034,22 @@ async function showGuildDetail(guildId) {
     } catch(e) {
         document.getElementById('gModalBody').innerHTML = `<div style="color:var(--err);text-align:center;padding:30px">${e.message}</div>`;
     }
+}
+
+async function setGuildChannel(guildId, remove = false) {
+    const channelId = remove ? null : document.getElementById('gmChannelSelect')?.value;
+    if (!remove && !channelId) return toast('Sélectionne un salon', 'err');
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/channel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ channelId: channelId || null })
+        })).json();
+        if (d.ok) {
+            toast(remove ? 'Canal supprimé' : '🔗 Lien généré !', 'ok');
+            await showGuildDetail(guildId); // refresh la modal
+        } else toast(d.error || 'Erreur', 'err');
+    } catch(e) { toast('Erreur', 'err'); }
 }
 
 async function saveGuildCfg(key, val) {
