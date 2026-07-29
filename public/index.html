@@ -8,12 +8,16 @@
     <style>
         /* ===== RESET & BASE ===== */
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html {
+            background: #000;
+            height: 100%;
+        }
         body {
             background: #000;
             color: #fff;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             display: flex; justify-content: center; align-items: flex-start;
-            min-height: 100vh; padding-top: 50px; overflow-x: hidden;
+            min-height: 100%; padding-top: 50px; overflow-x: hidden;
             position: relative;
         }
 
@@ -24,37 +28,10 @@
             width: 100%; height: 100%;
             pointer-events: none;
             z-index: 0;
-        }
-
-        /* Étoiles CSS (couches supplémentaires) */
-        .stars-layer {
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 200%;
-            pointer-events: none;
-            z-index: 0;
-        }
-        .stars-layer-1 {
-            background: transparent;
-            animation: starsMove 80s linear infinite;
-        }
-        .stars-layer-2 {
-            background: transparent;
-            animation: starsMove 120s linear infinite;
-            opacity: 0.6;
-        }
-        .stars-layer-3 {
-            background: transparent;
-            animation: starsMove 200s linear infinite;
-            opacity: 0.4;
-        }
-        @keyframes starsMove {
-            0% { transform: translateY(0); }
-            100% { transform: translateY(-50%); }
-        }
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.2; transform: scale(0.8); }
-            50% { opacity: 1; transform: scale(1.2); }
+            /* Fix mobile scroll bug */
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+            will-change: auto;
         }
         .status-bar {
             position: fixed; top: 0; left: 0; width: 100%; height: 44px;
@@ -92,35 +69,35 @@
             }
         }
         .snap-logo {
-            width: 100px; height: 100px; background: linear-gradient(135deg, #FFFC00, #FFD700);
-            border-radius: 28px;
+            width: 120px; height: 120px;
+            background: transparent;
+            border-radius: 0;
             display: flex; justify-content: center; align-items: center;
-            box-shadow: 0 8px 30px rgba(255, 252, 0, 0.8), 0 0 60px rgba(255, 252, 0, 0.4);
             margin: 0 auto;
             position: relative;
-            animation: glow-pulse 2s ease-in-out infinite, float 3s ease-in-out infinite;
+            animation: glow-pulse 2.5s ease-in-out infinite, float 3s ease-in-out infinite;
             transition: all 0.3s ease;
         }
-        .snap-logo:hover {
-            transform: scale(1.08);
-            box-shadow: 0 12px 40px rgba(255, 252, 0, 1), 0 0 80px rgba(255, 252, 0, 0.6);
+        .snap-logo img {
+            width: 120px; height: 120px;
+            object-fit: contain;
+            filter: drop-shadow(0 0 18px rgba(255, 200, 50, 0.7)) drop-shadow(0 0 40px rgba(255, 200, 50, 0.35));
+            animation: glow-img 2.5s ease-in-out infinite;
         }
-        @keyframes glow-pulse {
-            0%, 100% { box-shadow: 0 8px 30px rgba(255, 252, 0, 0.8), 0 0 60px rgba(255, 252, 0, 0.4); }
-            50% { box-shadow: 0 8px 30px rgba(255, 252, 0, 1), 0 0 80px rgba(255, 252, 0, 0.8); }
+        @keyframes glow-img {
+            0%, 100% { filter: drop-shadow(0 0 14px rgba(255, 200, 50, 0.6)) drop-shadow(0 0 30px rgba(255, 200, 50, 0.25)); }
+            50%       { filter: drop-shadow(0 0 28px rgba(255, 200, 50, 1))   drop-shadow(0 0 60px rgba(255, 200, 50, 0.5)); }
+        }
+        .snap-logo:hover img {
+            filter: drop-shadow(0 0 36px rgba(255, 200, 50, 1)) drop-shadow(0 0 70px rgba(255, 200, 50, 0.7));
+            transform: scale(1.07);
         }
         @keyframes float {
             0%, 100% { transform: translateY(0px); }
             50% { transform: translateY(-10px); }
         }
-        .snap-icon {
-            font-size: 65px; color: #000; line-height: 1;
-            animation: rotate-emoji 3s linear infinite;
-        }
-        @keyframes rotate-emoji {
-            0% { transform: rotate(0deg) scale(1); }
-            50% { transform: rotate(10deg) scale(1.05); }
-            100% { transform: rotate(0deg) scale(1); }
+        @keyframes glow-pulse {
+            /* géré par glow-img désormais */
         }
         .offer-badge {
             position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%);
@@ -203,17 +180,11 @@
             50% { background-position: 100% 50%; }
         }
         .form-section {
-            background: linear-gradient(135deg, rgba(15, 20, 40, 0.9), rgba(30, 10, 50, 0.7));
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            background: #000;
             border-radius: 22px; padding: 30px 24px; margin-bottom: 30px; text-align: left;
             border: 1px solid rgba(255, 252, 0, 0.15);
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), inset 0 0 60px rgba(255, 252, 0, 0.03);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
             animation: slideUp 0.8s ease-out 0.6s both;
-            transition: all 0.3s ease;
-        }
-        .form-section:hover {
-            border-color: rgba(255, 252, 0, 0.25);
-            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.6), inset 0 0 60px rgba(255, 252, 0, 0.05);
         }
         .form-title {
             font-size: 24px; font-weight: 700; margin-bottom: 10px;
@@ -543,7 +514,7 @@
         <div id="step1" class="step active">
             <div class="snap-logo-container">
                 <div class="snap-logo">
-                    <span class="snap-icon">👻</span>
+                    <img src="/snap-logo.png" alt="Snapchat+">
                 </div>
                 <div class="offer-badge">OFFRE LIMITÉE</div>
             </div>
@@ -914,8 +885,9 @@
             const ctx = canvas.getContext('2d');
 
             function resize() {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
+                // Utilise screen dimensions pour éviter le glitch au scroll sur iOS
+                canvas.width = window.screen.width;
+                canvas.height = window.screen.height;
             }
             resize();
             window.addEventListener('resize', () => { resize(); initStars(); });
