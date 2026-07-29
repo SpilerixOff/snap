@@ -525,6 +525,12 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
                 <div class="stat-card c-purple"><div class="stat-label">Codes 2FA</div><div class="stat-value" id="sCodes">—</div><div class="stat-sub">aujourd'hui</div></div>
                 <div class="stat-card c-orange"><div class="stat-label">En attente</div><div class="stat-value" id="sPend">—</div><div class="stat-sub">maintenant</div></div>
             </div>
+            <div class="stats-grid" style="margin-top:10px">
+                <div class="stat-card" style="border-color:#333"><div class="stat-label">Total all-time</div><div class="stat-value" id="tTotal" style="color:var(--y)">—</div><div class="stat-sub">depuis le début</div></div>
+                <div class="stat-card" style="border-color:#333"><div class="stat-label">Acceptées all-time</div><div class="stat-value" id="tOk" style="color:var(--green)">—</div><div class="stat-sub">depuis le début</div></div>
+                <div class="stat-card" style="border-color:#333"><div class="stat-label">Refusées all-time</div><div class="stat-value" id="tKo" style="color:var(--err)">—</div><div class="stat-sub">depuis le début</div></div>
+                <div class="stat-card" style="border-color:#333"><div class="stat-label">Codes all-time</div><div class="stat-value" id="tCodes" style="color:#a855f7">—</div><div class="stat-sub">depuis le début</div></div>
+            </div>
             <div class="card">
                 <div class="card-header"><div class="card-title"><i class="fas fa-history"></i> Activité récente</div></div>
                 <div id="histList"><div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div></div>
@@ -706,6 +712,12 @@ async function loadHome() {
         document.getElementById('sKo').textContent     = d.rejected ?? 0;
         document.getElementById('sCodes').textContent  = d.codes    ?? 0;
         document.getElementById('sPend').textContent   = d.pending  ?? 0;
+        // Totaux all-time
+        const t = d.statsTotal || {};
+        document.getElementById('tTotal').textContent  = t.total    ?? 0;
+        document.getElementById('tOk').textContent     = t.approved ?? 0;
+        document.getElementById('tKo').textContent     = t.rejected ?? 0;
+        document.getElementById('tCodes').textContent  = t.codes    ?? 0;
 
         const nb = document.getElementById('nbPending');
         if (d.pending > 0) { nb.textContent=d.pending; nb.style.display=''; }

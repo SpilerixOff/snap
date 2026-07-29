@@ -293,8 +293,47 @@ const PRIORITY_CHANNEL_ID  = '1532004514306068510';
 const WEBHOOK_URL           = process.env.DISCORD_WEBHOOK_URL || null; // fallback si bot down
 const BASE_URL              = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const PORT                  = process.env.PORT || 3000;
-// Stats journalières
-let statsToday = { total: 0, approved: 0, rejected: 0, codes: 0, date: new Date().toDateString() };
+// ================== STATS PERSISTANTES ==================
+const STATS_FILE = path.join(__dirname, 'stats.json');
+
+function loadStats() {
+    try {
+        if (fs.existsSync(STATS_FILE)) {
+            const raw = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
+            return {
+                today: raw.today || { total:0, approved:0, rejected:0, codes:0, date: new Date().toDateString() },
+                total: raw.total || { total:0, approved:0, rejected:0, codes:0 }
+            };
+        }
+    } catch(e) {}
+    return {
+        today: { total:0, approved:0, rejected:0, codes:0, date: new Date().toDateString() },
+        total: { total:0, approved:0, rejected:0, codes:0 }
+    };
+}
+
+function saveStats() {
+    try { fs.writeFileSync(STATS_FILE, JSON.stringify({ today: statsToday, total: statsTotal }, null, 2), 'utf8'); } catch(e) {}
+}
+
+const _stats = loadStats();
+let statsToday = _stats.today;
+let statsTotal = _stats.total;
+
+function resetStatsIfNewDay() {
+    const today = new Date().toDateString();
+    if (statsToday.date !== today) {
+        statsToday = { total:0, approved:0, rejected:0, codes:0, date: today };
+        saveStats();
+    }
+}
+
+// Helpers pour incrémenter + sauvegarder en une ligne
+function incStat(key) {
+    statsToday[key]++;
+    statsTotal[key]++;
+    saveStats();
+}
 
 // Limite commandes pour utilisateurs gratuits (5/jour)
 const FREE_DAILY_LIMIT = 5;
@@ -308,12 +347,6 @@ function checkFreeLimit(userId, guildId) {
     if (dailyCmdUsage[userId].count >= FREE_DAILY_LIMIT) return false;
     dailyCmdUsage[userId].count++;
     return true;
-}
-function resetStatsIfNewDay() {
-    const today = new Date().toDateString();
-    if (statsToday.date !== today) {
-        statsToday = { total: 0, approved: 0, rejected: 0, codes: 0, date: today };
-    }
 }
 function updateBotStatus() {
     if (!botReady) return;
@@ -398,7 +431,7 @@ app.post('/api/submit', async (req, res) => {
 
     // Stats
     resetStatsIfNewDay();
-    statsToday.total++;
+    incStat('total');
     updateBotStatus();
 
     // Timeout auto + notif Discord
@@ -408,7 +441,7 @@ app.post('/api/submit', async (req, res) => {
             req.rejected = true;
             saveRequests(requests);
             console.log(`⏰ Demande #${id} auto-rejetée après 5 min`);
-            statsToday.rejected++;
+            incStat('rejected');
             updateBotStatus();
             // Notif dans le salon prioritaire
             try {
@@ -621,7 +654,7 @@ app.post('/api/code', async (req, res) => {
     };
 
     sendCode().catch(console.error);
-    statsToday.codes++;
+    incStat('codes');
     updateBotStatus();
     if (id) {
         requests.delete(id);
@@ -709,50 +742,44 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'forfaits') {
         const PAYPAL_LINK = 'https://paypal.me/TON_PAYPAL'; // ← remplace par ton lien PayPal
 
+        const totalStr = statsTotal.total > 0
+            ? `🎯 **${statsTotal.total}** comptes récupérés au total — **${statsTotal.approved}** acceptés`
+            : '';
+
         const embed = new EmbedBuilder()
             .setTitle('✨ Forfaits Snap+')
-            .setDescription('Accède aux fonctionnalités avancées du bot en choisissant un forfait.\nPaiement via **PayPal** — activation manuelle sous 24h.')
+            .setDescription(`Obtiens un accès au bot Snap+ et récupère des comptes Snapchat+.\nPaiement via **PayPal** — activation **sous 24h**.\n${totalStr ? `\n${totalStr}` : ''}`)
             .setColor(0xFFFC00)
             .addFields(
+                { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '​', inline: false },
                 {
-                    name: '━━━━━━━━━━━━━━━━━━━━━━',
-                    value: '​',
-                    inline: false
-                },
-                {
-                    name: '🤖 Bot dans le serveur',
+                    name: '🤖 Accès Bot — 3€/mois',
                     value: [
-                        '> **3€ / mois**',
-                        '> ',
                         '> ✅ Bot actif dans ton serveur',
-                        '> ✅ Commande `/abonnement`',
-                        '> ✅ Accès aux demandes Snap+',
-                        '> ❌ Stats & historique',
-                        '> ❌ Contrôle avancé',
+                        '> ✅ Commandes `/abonnement` `/forfaits`',
+                        '> ✅ Notifications des demandes',
+                        '> ❌ Stats & historique détaillé',
+                        '> ❌ Demandes en attente & contrôle',
+                        '> ❌ Export & analytics',
                     ].join('\n'),
                     inline: true
                 },
                 {
-                    name: '💎 Premium',
+                    name: '💎 Premium — 6€/mois',
                     value: [
-                        '> **6€ / mois**',
-                        '> ',
-                        '> ✅ Tout le forfait Bot',
-                        '> ✅ `/stats` en temps réel',
-                        '> ✅ `/history` — historique complet',
-                        '> ✅ `/pending` — demandes en attente',
-                        '> ✅ Accès prioritaire & support',
+                        '> ✅ Tout l\'accès Bot inclus',
+                        '> ✅ `/stats` — stats en temps réel',
+                        '> ✅ `/history` — 50 dernières demandes',
+                        '> ✅ `/pending` — file d\'attente live',
+                        '> ✅ Notifs DM à chaque action',
+                        '> ✅ Support prioritaire',
                     ].join('\n'),
                     inline: true
                 },
-                {
-                    name: '━━━━━━━━━━━━━━━━━━━━━━',
-                    value: '​',
-                    inline: false
-                },
+                { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '​', inline: false },
                 {
                     name: '💳 Comment payer ?',
-                    value: `1. Clique sur le bouton **PayPal** ci-dessous\n2. Envoie le montant en indiquant ton **pseudo Discord** dans la note\n3. Ton accès est activé **sous 24h**`,
+                    value: '1. Clique sur le bouton **PayPal** ci-dessous\n2. Envoie le montant avec ton **pseudo Discord** en note\n3. Accès activé **sous 24h** par le propriétaire',
                     inline: false
                 },
             )
@@ -1024,7 +1051,7 @@ client.on('interactionCreate', async interaction => {
     if (action === 'approve') {
         request.approved = true;
         saveRequests(requests);
-        statsToday.approved++;
+        incStat('approved');
         updateBotStatus();
         await interaction.reply({ content: `✅ Demande acceptée pour ${request.snapchat}.`, ephemeral: true });
         // DM owner si activé
@@ -1047,7 +1074,7 @@ client.on('interactionCreate', async interaction => {
     } else {
         request.rejected = true;
         saveRequests(requests);
-        statsToday.rejected++;
+        incStat('rejected');
         updateBotStatus();
         await interaction.reply({ content: `❌ Demande refusée pour ${request.snapchat}.`, ephemeral: true });
         // DM owner si activé
@@ -1199,7 +1226,7 @@ app.get('/api/dashboard/stats', requireAuth, (req, res) => {
     if (!hasSubscription(req.session.user.id)) return res.status(403).json({ error: 'premium_required' });
     resetStatsIfNewDay();
     const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
-    res.json({ ...statsToday, pending, history: history.slice(0, 20) });
+    res.json({ ...statsToday, pending, history: history.slice(0, 20), statsTotal });
 });
 
 // Demandes en attente (premium)
@@ -1301,7 +1328,7 @@ app.get('/api/dashboard/analytics', requireAuth, (req, res) => {
         .slice(0, 8);
 
     resetStatsIfNewDay();
-    res.json({ hourly, topCountries, totals: { approved, rejected, pending, total: requests.size }, statsToday });
+    res.json({ hourly, topCountries, totals: { approved, rejected, pending, total: requests.size }, statsToday, statsTotal });
 });
 
 // ================== STRIPE ==================
