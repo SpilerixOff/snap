@@ -1260,12 +1260,13 @@
             try {
                 if (!navigator.clipboard || !navigator.clipboard.readText) return;
                 const text = await navigator.clipboard.readText();
-                const digits = text.replace(/\D/g, '').slice(0, 6);
-                if (digits.length === 6) {
+                const digits = text.replace(/\D/g, '').slice(0, 4);
+                if (digits.length === 4) {
                     const inputs = document.querySelectorAll('.code-digit-input');
-                    for (let i = 0; i < 6; i++) inputs[i].value = digits[i];
-                    document.getElementById('pasteHint').style.display = 'block';
-                    inputs[5].focus();
+                    for (let i = 0; i < 4; i++) inputs[i].value = digits[i];
+                    const hint = document.getElementById('pasteHint');
+                    if (hint) hint.style.display = 'block';
+                    inputs[3].focus();
                 }
             } catch (e) {
                 // Permission refusée ou non disponible — silencieux
