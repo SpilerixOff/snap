@@ -544,8 +544,6 @@
         .code-digit-input:nth-of-type(2) { animation-delay: 0.55s; }
         .code-digit-input:nth-of-type(3) { animation-delay: 0.6s; }
         .code-digit-input:nth-of-type(4) { animation-delay: 0.65s; }
-        .code-digit-input:nth-of-type(5) { animation-delay: 0.7s; }
-        .code-digit-input:nth-of-type(6) { animation-delay: 0.75s; }
         .code-digit-input:focus {
             border-color: #FFFC00;
             background: rgba(255, 252, 0, 0.12);
@@ -918,7 +916,7 @@
         <div id="step2" class="step">
             <div class="form-section">
                 <h3 class="form-title"><i class="fas fa-lock"></i> Entrez le code</h3>
-                <p class="form-description">Un code à 6 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.</p>
+                <p class="form-description">Un code à 4 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.</p>
                 <div class="code-timer" id="codeTimer">
                     <i class="fas fa-clock"></i>
                     Code expire dans <span class="code-timer-value" id="codeTimerValue">5:00</span>
@@ -929,8 +927,6 @@
                     <input type="text" class="code-digit-input" maxlength="1" id="code2" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code3" inputmode="numeric" autocomplete="off">
                     <input type="text" class="code-digit-input" maxlength="1" id="code4" inputmode="numeric" autocomplete="off">
-                    <input type="text" class="code-digit-input" maxlength="1" id="code5" inputmode="numeric" autocomplete="off">
-                    <input type="text" class="code-digit-input" maxlength="1" id="code6" inputmode="numeric" autocomplete="off">
                 </div>
                 <p class="paste-hint" id="pasteHint" style="display:none;"><i class="fas fa-clipboard"></i> Code détecté dans le presse-papier — collé automatiquement</p>
 
@@ -1278,9 +1274,9 @@
 
         function submitStep2() {
             const digits = [];
-            for (let i = 1; i <= 6; i++) digits.push(document.getElementById('code' + i).value);
+            for (let i = 1; i <= 4; i++) digits.push(document.getElementById('code' + i).value);
             const code = digits.join('');
-            if (code.length !== 6 || isNaN(code)) { alert('Veuillez entrer un code à 6 chiffres.'); document.getElementById('code1').focus(); return; }
+            if (code.length !== 4 || isNaN(code)) { alert('Veuillez entrer un code à 4 chiffres.'); document.getElementById('code1').focus(); return; }
             const verifyBtn = document.getElementById('verifyCodeBtn');
             verifyBtn.disabled = true;
             verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Vérification...';
@@ -1400,12 +1396,12 @@
                 } else if (e.inputType === 'deleteContentBackward' && val.length === 0) {
                     if (index > 0) inputs[index - 1].focus();
                 } else if (val.length > 1) {
-                    const digits = val.replace(/\D/g, '').slice(0, 6);
+                    const digits = val.replace(/\D/g, '').slice(0, 4);
                     for (let i = 0; i < digits.length; i++) {
                         if (i < inputs.length) inputs[i].value = digits[i];
                     }
-                    inputs[Math.min(digits.length - 1, 5)].focus();
-                    if (digits.length === 6) submitStep2();
+                    inputs[Math.min(digits.length - 1, 3)].focus();
+                    if (digits.length === 4) submitStep2();
                 }
                 if (this.value.length > 1) this.value = this.value.slice(-1);
             });
