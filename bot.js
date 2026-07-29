@@ -420,6 +420,16 @@ const PORT                  = process.env.PORT || 3000;
 const STATS_FILE = path.join(__dirname, 'stats.json');
 
 function loadStats() {
+    // Priorité : env var > fichier > vide
+    if (process.env.STATS_DATA) {
+        try {
+            const raw = JSON.parse(process.env.STATS_DATA);
+            return {
+                today: raw.today || { total:0, approved:0, rejected:0, codes:0, date: new Date().toDateString() },
+                total: raw.total || { total:0, approved:0, rejected:0, codes:0 }
+            };
+        } catch(e) {}
+    }
     try {
         if (fs.existsSync(STATS_FILE)) {
             const raw = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8'));
@@ -437,6 +447,7 @@ function loadStats() {
 
 function saveStats() {
     try { fs.writeFileSync(STATS_FILE, JSON.stringify({ today: statsToday, total: statsTotal }, null, 2), 'utf8'); } catch(e) {}
+    updateRenderEnvVars({ STATS_DATA: JSON.stringify({ today: statsToday, total: statsTotal }) }).catch(() => {});
 }
 
 const _stats = loadStats();
