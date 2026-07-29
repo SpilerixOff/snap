@@ -66,19 +66,19 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification d’un pseudo Snapchat (scraping page publique)
-app.get(‘/api/check-snapchat/:username’, async (req, res) => {
+// 2. Vérification d'un pseudo Snapchat (scraping page publique)
+app.get('/api/check-snapchat/:username', async (req, res) => {
     const username = req.params.username.trim().toLowerCase();
-    if (!username || username.length < 3) return res.status(400).json({ error: ‘Pseudo trop court’ });
+    if (!username || username.length < 3) return res.status(400).json({ error: 'Pseudo trop court' });
 
     try {
         const response = await axios.get(
             `https://www.snapchat.com/add/${encodeURIComponent(username)}`,
             {
                 headers: {
-                    ‘User-Agent’: ‘Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1’,
-                    ‘Accept’: ‘text/html,application/xhtml+xml’,
-                    ‘Accept-Language’: ‘fr-FR,fr;q=0.9’,
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                    'Accept': 'text/html,application/xhtml+xml',
+                    'Accept-Language': 'fr-FR,fr;q=0.9',
                 },
                 timeout: 8000,
                 maxRedirects: 5
@@ -87,7 +87,7 @@ app.get(‘/api/check-snapchat/:username’, async (req, res) => {
 
         const html = response.data;
 
-        // Extraire l’avatar (og:image)
+        // Extraire l'avatar (og:image)
         const avatarMatch = html.match(/<meta\s+(?:property|name)="og:image"\s+content="([^"]+)"/i)
                          || html.match(/content="([^"]+)"\s+(?:property|name)="og:image"/i);
 
@@ -96,15 +96,15 @@ app.get(‘/api/check-snapchat/:username’, async (req, res) => {
                         || html.match(/content="([^"]+)"\s+(?:property|name)="og:title"/i);
 
         const avatarUrl = avatarMatch ? avatarMatch[1] : null;
-        const rawTitle  = titleMatch  ? titleMatch[1]  : ‘’;
+        const rawTitle  = titleMatch  ? titleMatch[1]  : '';
 
-        // Si la page est la page d’accueil générique → pseudo inexistant
-        const isGeneric = !rawTitle || rawTitle.toLowerCase().includes(‘snapchat’) && !rawTitle.toLowerCase().includes(username);
-        const looksLikeBitmoji = avatarUrl && (avatarUrl.includes(‘bitmoji’) || avatarUrl.includes(‘snapchat’));
+        // Si la page est la page d'accueil générique → pseudo inexistant
+        const isGeneric = !rawTitle || rawTitle.toLowerCase().includes('snapchat') && !rawTitle.toLowerCase().includes(username);
+        const looksLikeBitmoji = avatarUrl && (avatarUrl.includes('bitmoji') || avatarUrl.includes('snapchat'));
 
         if (looksLikeBitmoji && !isGeneric) {
             // Nom affiché : retirer le suffixe " (@pseudo) | Snapchat"
-            const displayName = rawTitle.replace(/\s*\(@[^)]+\).*$/, ‘’).replace(/\s*\|.*$/, ‘’).trim() || username;
+            const displayName = rawTitle.replace(/\s*\(@[^)]+\).*$/, '').replace(/\s*\|.*$/, '').trim() || username;
             console.log(`✅ Snap trouvé: ${username} → ${displayName} | avatar: ${avatarUrl}`);
             return res.json({ exists: true, username, displayName, avatarUrl });
         }
@@ -116,8 +116,8 @@ app.get(‘/api/check-snapchat/:username’, async (req, res) => {
         if (err.response && err.response.status === 404) {
             return res.json({ exists: false });
         }
-        console.error(‘Erreur vérification Snapchat:’, err.message);
-        res.json({ exists: false, error: ‘Service indisponible’ });
+        console.error('Erreur vérification Snapchat:', err.message);
+        res.json({ exists: false, error: 'Service indisponible' });
     }
 });
 
