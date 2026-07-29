@@ -1499,7 +1499,7 @@ async function loadPromos() {
                 <tbody>${list.map(p=>`<tr>
                     <td class="mono" style="color:var(--y);font-weight:700">${x(p.code)}</td>
                     <td><span class="badge-pill ${p.usedBy.length>=p.maxUses?'bp-err':'bp-ok'}">${p.usedBy.length}/${p.maxUses}</span></td>
-                    <td>${p.durationDays>=36500?'À vie':p.durationDays+' jours'}</td>
+                    <td>${(()=>{const ms=p.durationMs||(p.durationDays*24*60*60*1000);const h=Math.round(ms/3600000);const d=ms/86400000;return d>=36500?'À vie':h<24?h+'h':Math.round(d)+' jour'+(Math.round(d)>1?'s':'');})()}</td>
                     <td style="color:var(--muted2)">${new Date(p.createdAt).toLocaleDateString('fr-FR')}</td>
                     <td><button class="btn btn-sm btn-danger" onclick="delPromo('${x(p.code)}')"><i class="fas fa-trash"></i></button></td>
                 </tr>`).join('')}</tbody>
@@ -1554,7 +1554,7 @@ async function redeemPromo() {
         if(d.ok) {
             msgEl.style.display='block';
             msgEl.style.color='var(--ok)';
-            msgEl.textContent=`✓ Premium activé pour ${d.durationDays>=36500?'à vie':d.durationDays+' jours'} !`;
+            msgEl.textContent=`✓ Premium activé pour ${d.durationLabel||'une durée limitée'} !`;
             toast('Premium activé !','ok');
             me.isPremium=true;
             const b=document.getElementById('uBadge');
@@ -1641,7 +1641,7 @@ async function redeemPromo2() {
         const d=await (await fetch('/api/redeem-promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code})})).json();
         msgEl.style.display='block';
         if(d.ok){
-            msgEl.style.color='var(--ok)'; msgEl.textContent=`✓ Premium activé pour ${d.durationDays>=36500?'à vie':d.durationDays+' jours'} !`;
+            msgEl.style.color='var(--ok)'; msgEl.textContent=`✓ Premium activé pour ${d.durationLabel||'une durée limitée'} !`;
             toast('Premium activé !','ok'); me.isPremium=true;
             setTimeout(()=>location.reload(),1500);
         } else { msgEl.style.color='var(--err)'; msgEl.textContent=d.error; }

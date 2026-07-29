@@ -898,7 +898,7 @@ client.on('interactionCreate', async interaction => {
             const owner = await client.users.fetch(OWNER_ID);
             await owner.send({ embeds: [promoEmbed] });
         } catch(e) {}
-        return interaction.reply({ embeds: [promoEmbed], ephemeral: true });
+        return interaction.reply({ embeds: [promoEmbed] });
     }
 
     // /setchannel — requiert premium sur le serveur OU owner
@@ -2026,14 +2026,20 @@ app.post('/api/redeem-promo', requireAuth, (req, res) => {
     promo.usedBy.push(userId);
     savePromos(promos);
 
-    const expiresAt = Date.now() + (promo.durationMs || promo.durationDays * 24 * 60 * 60 * 1000);
+    const durationMs = promo.durationMs || (promo.durationDays * 24 * 60 * 60 * 1000);
+    const expiresAt = Date.now() + durationMs;
+    const durationHours = Math.round(durationMs / (60 * 60 * 1000));
+    const durationDays = durationMs / (24 * 60 * 60 * 1000);
+    const durationLabel = durationDays >= 36500 ? 'à vie'
+        : durationHours < 24 ? `${durationHours}h`
+        : `${Math.round(durationDays)} jour${Math.round(durationDays) > 1 ? 's' : ''}`;
     subs[userId] = { active: true, startedAt: Date.now(), expiresAt, promoCode: code };
     saveSubs(subs);
 
     // Met à jour la session
     req.session.user._premiumRefresh = Date.now();
 
-    res.json({ ok: true, expiresAt, durationDays: promo.durationDays });
+    res.json({ ok: true, expiresAt, durationDays, durationLabel });
 });
 
 // Page 404 custom
