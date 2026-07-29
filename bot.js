@@ -546,9 +546,16 @@ app.post('/api/submit', async (req, res) => {
         const targetChannelId = refChannelId || APPROVAL_CHANNEL_ID;
         console.log(`[DISCORD] Envoi vers channel ${targetChannelId} (${refGuildId ? 'client' : 'owner'})`);
 
-        const mainChannel     = client.channels.cache.get(targetChannelId);
+        // Récupérer le channel — essai cache puis fetch si absent
+        let mainChannel = client.channels.cache.get(targetChannelId);
+        if (!mainChannel) {
+            try { mainChannel = await client.channels.fetch(targetChannelId); }
+            catch(e) { console.error(`[DISCORD] Channel ${targetChannelId} introuvable:`, e.message); }
+        }
+
         const priorityChannel = (!refGuildId && cfg.salon_prioritaire) ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
         if (!mainChannel) {
+            console.error(`[DISCORD] Aucun channel trouvé pour ${targetChannelId} — fallback webhook`);
             await sendWebhookFallback(`📱 Nouvelle demande : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
             return;
         }
@@ -600,10 +607,12 @@ app.post('/api/submit', async (req, res) => {
             await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !${refGuildId ? ` (via lien client \`${refGuildId}\`)` : ''}`, embeds: [priorityEmbed] });
         }
 
+        // Délai seulement si salon prioritaire actif (pour l'owner), sinon envoi immédiat
+        const sendDelay = (priorityChannel && !refGuildId) ? cfg.delai_discord_sec * 1000 : 0;
         setTimeout(async () => {
             try { await mainChannel.send({ embeds: [embed], components: [row] }); }
             catch (e) { console.error('Erreur envoi salon principal:', e.message); }
-        }, cfg.delai_discord_sec * 1000);
+        }, sendDelay);
 
         console.log(`✅ Demande #${id} envoyée à Discord`);
     };
@@ -2013,7 +2022,7 @@ client.once('ready', async () => {
                 console.warn(`⚠️ Commands non enregistrées dans ${guildId}: ${e.message}`);
             }
         }
-        console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (/dashboard, /setstatus, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)`);
+        console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (/dashboard, /setstatus, /abonnement, /forfaits, /guide, /setchannel, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)`);
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
