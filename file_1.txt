@@ -1,0 +1,6 @@
+discord-phish/
+├── package.json
+├── .env.example
+├── bot.js
+└── public/
+    └── index.html

