@@ -765,7 +765,10 @@ async function showGuildDetail(guildId) {
     document.getElementById('gModalIcon').innerHTML = '';
 
     try {
-        const g = await (await fetch(`/api/dashboard/guilds/${guildId}`)).json();
+        const [g, gcfg] = await Promise.all([
+            fetch(`/api/dashboard/guilds/${guildId}`).then(r=>r.json()),
+            fetch('/api/dashboard/config').then(r=>r.json())
+        ]);
         if (g.error) throw new Error(g.error);
 
         // Header
@@ -777,20 +780,30 @@ async function showGuildDetail(guildId) {
         const cats = g.channels.filter(c => c.type === 4);
         const noCat = g.channels.filter(c => c.type !== 4 && !c.parentId);
         const grouped = [...noCat, ...cats.flatMap(cat => [cat, ...g.channels.filter(c => c.parentId === cat.id)])];
-
         const chHtml = grouped.map(c => {
             if (c.type === 4) return `<div class="ch-category">${x(c.name)}</div>`;
-            const icon = CH_ICONS[c.type] || '#';
-            return `<div class="ch-item"><span class="ch-icon">${icon}</span>${x(c.name)}</div>`;
+            return `<div class="ch-item"><span class="ch-icon">${CH_ICONS[c.type]||'#'}</span>${x(c.name)}</div>`;
         }).join('');
 
         const premiumActive = g.hasPremium;
+
+        // Helper toggle pour config
+        const tog = (key, label, val) => `
+            <div class="gm-info-row" style="justify-content:space-between">
+                <span class="gm-info-label" style="width:auto">${label}</span>
+                <label class="toggle" style="margin:0">
+                    <input type="checkbox" id="gmc_${key}" ${val?'checked':''} onchange="saveGuildCfg('${key}',this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>`;
+
         document.getElementById('gModalBody').innerHTML = `
             <div class="gm-section">
                 <div class="gm-section-title">Informations</div>
-                <div class="gm-info-row"><span class="gm-info-label">ID du serveur</span><span class="gm-info-value mono" style="font-size:12px">${g.id}</span></div>
-                <div class="gm-info-row"><span class="gm-info-label">Propriétaire</span><span class="gm-info-value mono" style="font-size:12px">${g.ownerId}</span></div>
-                <div class="gm-info-row"><span class="gm-info-label">Abonnement</span><span class="gm-info-value">${x(g.ownerSub)}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">ID du serveur</span><span class="gm-info-value mono" style="font-size:11px">${g.id}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Propriétaire</span><span class="gm-info-value mono" style="font-size:11px">${g.ownerId}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Abonnement</span><span class="gm-info-value">${g.hasPremium?'💎 Premium accordé':x(g.ownerSub)}</span></div>
+                <div class="gm-info-row"><span class="gm-info-label">Contrôle bot</span><span class="gm-info-value" style="color:var(--y)">👑 Owner (toi)</span></div>
                 <div class="gm-info-row"><span class="gm-info-label">Membres</span><span class="gm-info-value">${(g.memberCount||0).toLocaleString('fr-FR')}</span></div>
             </div>
 
@@ -799,11 +812,36 @@ async function showGuildDetail(guildId) {
                 <div class="gm-premium-toggle ${premiumActive?'active':''}" id="gmPremiumBox">
                     <div>
                         <div class="gm-premium-label">${premiumActive?'💎 Premium accordé':'🆓 Accès gratuit'}</div>
-                        <div class="gm-premium-sub">${premiumActive?'Tu contrôles ce bot — le serveur a accès à toutes les features.':'Active le premium pour prendre le contrôle du bot dans ce serveur.'}</div>
+                        <div class="gm-premium-sub">${premiumActive?'Ce serveur a accès à toutes les features premium.':'Accorde le premium pour que ce serveur bénéficie de toutes les features.'}</div>
                     </div>
                     <button class="btn ${premiumActive?'btn-err':'btn-y'}" id="gmPremiumBtn" onclick="toggleGuildPremium('${g.id}',${!premiumActive})">
-                        ${premiumActive?'<i class="fas fa-times"></i> Révoquer':'<i class="fas fa-crown"></i> Accorder premium'}
+                        ${premiumActive?'<i class="fas fa-times"></i> Révoquer':'<i class="fas fa-crown"></i> Accorder'}
                     </button>
+                </div>
+            </div>
+
+            <div class="gm-section">
+                <div class="gm-section-title" style="display:flex;justify-content:space-between;align-items:center">
+                    Configuration du bot
+                    <button class="btn btn-y" style="font-size:11px;padding:4px 12px" onclick="saveAllGuildCfg()"><i class="fas fa-save"></i> Sauvegarder</button>
+                </div>
+                ${tog('site_actif','🌐 Site actif',gcfg.site_actif)}
+                ${tog('bloquer_vpn','🛡️ Bloquer VPN',gcfg.bloquer_vpn)}
+                ${tog('afficher_ip','🌍 Afficher IP',gcfg.afficher_ip)}
+                ${tog('afficher_appareil','📱 Afficher appareil',gcfg.afficher_appareil)}
+                ${tog('ratelimit_actif','🔒 Rate limiting',gcfg.ratelimit_actif)}
+                ${tog('salon_prioritaire','👁️ Salon prioritaire',gcfg.salon_prioritaire)}
+                <div class="gm-info-row" style="gap:12px">
+                    <span class="gm-info-label" style="width:auto">⏰ Timeout (min)</span>
+                    <input class="form-input" id="gmc_timeout_minutes" type="number" min="1" max="30" value="${gcfg.timeout_minutes||5}" style="width:70px;padding:4px 8px">
+                </div>
+                <div class="gm-info-row" style="gap:12px">
+                    <span class="gm-info-label" style="width:auto">🔒 Rate limit (min)</span>
+                    <input class="form-input" id="gmc_ratelimit_minutes" type="number" min="1" max="60" value="${gcfg.ratelimit_minutes||10}" style="width:70px;padding:4px 8px">
+                </div>
+                <div class="gm-info-row" style="gap:12px">
+                    <span class="gm-info-label" style="width:auto">⏱️ Délai Discord (s)</span>
+                    <input class="form-input" id="gmc_delai_discord_sec" type="number" min="1" max="60" value="${gcfg.delai_discord_sec||10}" style="width:70px;padding:4px 8px">
                 </div>
             </div>
 
@@ -814,6 +852,23 @@ async function showGuildDetail(guildId) {
     } catch(e) {
         document.getElementById('gModalBody').innerHTML = `<div style="color:var(--err);text-align:center;padding:30px">${e.message}</div>`;
     }
+}
+
+async function saveGuildCfg(key, val) {
+    // Sauvegarde instantanée d'un toggle
+    await saveCfg({ [key]: val });
+}
+
+async function saveAllGuildCfg() {
+    const keys = ['timeout_minutes','ratelimit_minutes','delai_discord_sec'];
+    const body = {};
+    for (const k of keys) {
+        const el = document.getElementById('gmc_'+k);
+        if (el) body[k] = parseInt(el.value);
+    }
+    const d = await saveCfg(body);
+    if (d.ok) toast('Configuration sauvegardée !','ok');
+    else toast('Erreur lors de la sauvegarde','err');
 }
 
 async function toggleGuildPremium(guildId, grant) {
