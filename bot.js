@@ -142,7 +142,11 @@ const DISCORD_CLIENT_ID     = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
 function requireAuth(req, res, next) {
-    if (!req.session || !req.session.user) return res.redirect('/login');
+    if (!req.session || !req.session.user) {
+        // Routes API → JSON 401 (pas de redirect qui casse le .json())
+        if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'not_logged_in' });
+        return res.redirect('/login');
+    }
     next();
 }
 
@@ -1814,11 +1818,13 @@ app.post('/api/dashboard/guilds/:id/premium', requireAuth, (req, res) => {
     const { grant } = req.body;
     if (!cfg.guild_premiums) cfg.guild_premiums = {};
     if (grant) {
-        cfg.guild_premiums[guildId] = { grantedAt: Date.now() };
+        cfg.guild_premiums[guildId] = { grantedAt: Date.now(), tier: grant };
     } else {
         delete cfg.guild_premiums[guildId];
     }
     saveConfig(cfg);
+    // Mettre à jour les commandes visibles dans ce guild
+    if (client._registerGuildCommands) client._registerGuildCommands(guildId).catch(() => {});
     res.json({ ok: true, hasPremium: !!cfg.guild_premiums[guildId] });
 });
 
@@ -2068,7 +2074,7 @@ app.post('/api/redeem-promo', requireAuth, (req, res) => {
     // Met à jour la session
     req.session.user._premiumRefresh = Date.now();
 
-    res.json({ ok: true, expiresAt, durationDays, durationLabel });
+    res.json({ ok: true, expiresAt, durationDays, durationLabel, tier: promo.tier || 'premium' });
 });
 
 // Page 404 custom
@@ -2163,42 +2169,54 @@ client.once('ready', async () => {
             'ratelimit_minutes','timeout_minutes','delai_discord_sec'
         ];
 
-        const commandBody = [
-                new SlashCommandBuilder()
-                    .setName('dashboard')
-                    .setDescription('🖥️ Accéder au dashboard web [OWNER ONLY]')
-                    .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('setstatus')
-                    .setDescription('📡 Configurer le canal de status live dans ce salon [OWNER ONLY]')
-                    .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('abonnement')
-                    .setDescription('💎 Voir le statut de ton abonnement')
-                    .toJSON(),
-
+        // ── Commandes publiques (tous les serveurs) ──────────────────────
+        const publicCmds = [
                 new SlashCommandBuilder()
                     .setName('forfaits')
                     .setDescription('💰 Voir les forfaits et tarifs disponibles')
                     .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('setchannel')
-                    .setDescription('📥 Définir ce salon comme récepteur des demandes Snap+')
-                    .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('guide')
-                    .setDescription('📖 Guide complet — comment utiliser le bot Snap+')
-                    .toJSON(),
-
                 new SlashCommandBuilder()
                     .setName('install')
                     .setDescription('🚀 Guide d\'installation — ajouter le bot sur un nouveau serveur')
                     .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('abonnement')
+                    .setDescription('💎 Voir le statut de ton abonnement')
+                    .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('guide')
+                    .setDescription('📖 Guide complet — comment utiliser le bot Snap+')
+                    .toJSON(),
+        ];
 
+        // ── Commandes Bot tier (accès bot ou premium) ────────────────────
+        const botCmds = [
+                ...publicCmds,
+                new SlashCommandBuilder()
+                    .setName('setchannel')
+                    .setDescription('📥 Définir ce salon comme récepteur des demandes Snap+')
+                    .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('infodash')
+                    .setDescription('📊 Présenter le dashboard de gestion dans ce salon')
+                    .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('stats')
+                    .setDescription('📊 Voir les stats du jour [PREMIUM]')
+                    .toJSON(),
+        ];
+
+        // ── Commandes Owner (serveurs de l'owner uniquement) ─────────────
+        const ownerCmds = [
+                ...botCmds,
+                new SlashCommandBuilder()
+                    .setName('dashboard')
+                    .setDescription('🖥️ Accéder au dashboard web [OWNER ONLY]')
+                    .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('setstatus')
+                    .setDescription('📡 Configurer le canal de status live dans ce salon [OWNER ONLY]')
+                    .toJSON(),
                 new SlashCommandBuilder()
                     .setName('genpromo')
                     .setDescription('🎟️ Générer un code promo [OWNER ONLY]')
@@ -2207,16 +2225,6 @@ client.once('ready', async () => {
                     .addIntegerOption(o => o.setName('heures').setDescription('Durée en heures (ex: 24)').setRequired(true).setMinValue(1).setMaxValue(8760))
                     .addIntegerOption(o => o.setName('utilisations').setDescription('Nombre max d\'utilisations (défaut: 1)').setRequired(false).setMinValue(1))
                     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-                    .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('infodash')
-                    .setDescription('📊 Présenter le dashboard de gestion dans ce salon')
-                    .toJSON(),
-
-                new SlashCommandBuilder()
-                    .setName('stats')
-                    .setDescription('📊 Voir les stats du jour [PREMIUM]')
                     .toJSON(),
 
                 new SlashCommandBuilder()
@@ -2297,17 +2305,38 @@ client.once('ready', async () => {
         // Supprimer les anciennes global commands (évite les doublons)
         await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
 
-        // Enregistrer uniquement en guild commands (apparaissent immédiatement, pas de doublon)
-        let registeredCount = 0;
-        for (const [guildId] of client.guilds.cache) {
+        // Fonction réutilisable pour enregistrer les commandes d'un guild selon son niveau
+        async function registerGuildCommands(guildId) {
+            let cmds;
+            const guild = client.guilds.cache.get(guildId);
+            if (!guild) return;
+            // Déterminer si l'owner est dans ce serveur
+            const isOwnerGuild = guild.members.cache.has(OWNER_ID) || (await guild.members.fetch(OWNER_ID).catch(() => null));
+            if (isOwnerGuild) {
+                cmds = ownerCmds;
+            } else if (hasGuildBotAccess(guildId)) {
+                cmds = botCmds;
+            } else {
+                cmds = publicCmds;
+            }
             try {
-                await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: commandBody });
-                registeredCount++;
+                await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body: cmds });
+                console.log(`[CMDS] ${guild.name} → ${cmds.length} commandes (${isOwnerGuild ? 'owner' : hasGuildBotAccess(guildId) ? 'bot' : 'public'})`);
             } catch(e) {
                 console.warn(`⚠️ Commands non enregistrées dans ${guildId}: ${e.message}`);
             }
         }
-        console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (/dashboard, /setstatus, /abonnement, /forfaits, /guide, /setchannel, /stats, /config, /clear, /history, /pause, /resume, /pending, /blacklist)`);
+
+        // Enregistrer pour tous les guilds actuels
+        let registeredCount = 0;
+        for (const [guildId] of client.guilds.cache) {
+            await registerGuildCommands(guildId);
+            registeredCount++;
+        }
+        console.log(`✅ Slash commands enregistrées dans ${registeredCount} serveur(s) (sets public/bot/owner selon accès)`);
+
+        // Exposer la fonction pour la réutiliser lors des changements d'accès
+        client._registerGuildCommands = registerGuildCommands;
     } catch (e) {
         console.error('Erreur enregistrement slash commands:', e.message);
     }
@@ -2329,6 +2358,8 @@ client.once('ready', async () => {
 // ================== GUILD JOIN / LEAVE ==================
 client.on('guildCreate', async (guild) => {
     console.log(`[GUILD] Bot ajouté sur : ${guild.name} (${guild.id})`);
+    // Enregistrer les commandes adaptées au niveau d'accès du nouveau serveur
+    if (client._registerGuildCommands) await client._registerGuildCommands(guild.id);
     if (!cfg.guild_notifications) cfg.guild_notifications = [];
     cfg.guild_notifications.unshift({
         guildId: guild.id,
