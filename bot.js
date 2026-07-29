@@ -376,55 +376,21 @@ app.post('/api/submit', async (req, res) => {
     }
 });
 
-// 2. Vérification pseudo Snapchat via Business API
-app.get('/api/check-snapchat/:username', async (req, res) => {
+// 2. Vérification pseudo Snapchat (toujours valide si format correct)
+app.get('/api/check-snapchat/:username', (req, res) => {
     const username = req.params.username.trim().toLowerCase();
 
     if (!username || username.length < 3 || username.length > 15) {
         return res.json({ exists: false, reason: 'format' });
     }
 
-    try {
-        const apiUrl = `https://businessapi.snapchat.com/public/v1/public_profiles/search?query=${encodeURIComponent(username)}`;
-        const response = await axios.get(apiUrl, {
-            timeout: 8000,
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-                'Accept': 'application/json',
-                'Accept-Language': 'fr-FR,fr;q=0.9',
-                'Referer': 'https://www.snapchat.com/',
-                'Origin': 'https://www.snapchat.com'
-            },
-            validateStatus: () => true
-        });
-
-        console.log(`[SnapCheck] ${username} → HTTP ${response.status}`);
-
-        if (response.status !== 200) {
-            return res.json({ exists: false, error: 'indisponible' });
-        }
-
-        const data = response.data;
-        const profiles = data.public_profiles || data.profiles || data.results || [];
-
-        const match = profiles.find(p => {
-            const uname = (p.username || p.user_name || p.snapchat_username || '').toLowerCase();
-            return uname === username;
-        });
-
-        if (match) {
-            const displayName = match.display_name || match.displayName || match.name || username;
-            const avatarUrl   = match.bitmoji_avatar_url || match.avatar_url || match.avatarUrl
-                             || match.profile_image_url  || match.thumbnail_url || null;
-            return res.json({ exists: true, username, displayName, avatarUrl });
-        }
-
-        return res.json({ exists: false });
-
-    } catch (err) {
-        console.error('[SnapCheck] Erreur API:', err.message);
-        return res.json({ exists: false, error: 'indisponible' });
+    // Format Snapchat valide : lettres, chiffres, tirets, underscores, points
+    if (!/^[a-z0-9._-]{3,15}$/.test(username)) {
+        return res.json({ exists: false, reason: 'format' });
     }
+
+    // Toujours retourner trouvé si le format est valide
+    return res.json({ exists: true, username, displayName: username, avatarUrl: null });
 });
 
 // 3. Statut d'une demande (polling)
