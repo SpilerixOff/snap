@@ -518,6 +518,20 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
         <div id="s-home" class="section active">
             <div class="page-title">Tableau de bord</div>
             <div class="page-sub" id="dateStr">…</div>
+            <div id="inviteBanner" style="display:none;background:linear-gradient(135deg,#1a1a2e,#16213e);border:1px solid #FFD60033;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div style="font-size:22px">🤖</div>
+                    <div>
+                        <div style="font-weight:700;color:#fff;font-size:14px">Ajouter le bot à un nouveau serveur</div>
+                        <div style="font-size:12px;color:var(--muted);margin-top:2px">Partage ce lien à tes clients ou invite le bot toi-même</div>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <code id="inviteLinkText" style="background:#0d0d0d;padding:6px 12px;border-radius:6px;font-size:11px;color:var(--y);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></code>
+                    <button class="btn btn-y" onclick="copyInviteLink()" style="flex-shrink:0"><i class="fas fa-copy"></i> Copier</button>
+                    <a id="inviteLinkBtn" href="#" target="_blank" class="btn" style="background:#5865F2;color:#fff;flex-shrink:0;text-decoration:none"><i class="fab fa-discord"></i> Inviter</a>
+                </div>
+            </div>
             <div class="stats-grid">
                 <div class="stat-card c-yellow"><div class="stat-label">Demandes</div><div class="stat-value" id="sTotal">—</div><div class="stat-sub">aujourd'hui</div></div>
                 <div class="stat-card c-green"><div class="stat-label">Acceptées</div><div class="stat-value" id="sOk">—</div><div class="stat-sub">aujourd'hui</div></div>
@@ -583,6 +597,13 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
                             <button class="btn btn-y" onclick="navigator.clipboard.writeText(document.getElementById('lgLink').textContent).then(()=>toast('Lien copié !','ok'))" style="flex-shrink:0"><i class="fas fa-copy"></i></button>
                         </div>
                         <div id="lgMeta" style="font-size:11px;color:var(--muted);margin-top:8px"></div>
+                    <div id="lgEnvHint" style="display:none;margin-top:10px;padding:10px;background:#1a1200;border:1px solid #FFD60044;border-radius:6px">
+                        <div style="font-size:11px;font-weight:700;color:var(--y);margin-bottom:6px">⚠️ Colle ça dans Render → Environment → <code>GUILD_CHANNELS</code> pour que ça persiste après chaque déploiement :</div>
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <code id="lgEnvJson" style="flex:1;background:#0d0d0d;padding:6px 10px;border-radius:4px;font-size:11px;color:#fff;word-break:break-all"></code>
+                            <button class="btn btn-y" style="font-size:11px;padding:4px 10px;flex-shrink:0" onclick="navigator.clipboard.writeText(document.getElementById('lgEnvJson').textContent).then(()=>toast('Copié !','ok'))"><i class="fas fa-copy"></i></button>
+                        </div>
+                    </div>
                     </div>
                 </div>
             </div>
@@ -680,6 +701,14 @@ async function init() {
         if (me.isOwner)       { b.textContent='👑 Owner'; b.className='badge owner'; }
         else if (me.isPremium){ b.textContent='⭐ Premium'; b.className='badge premium'; }
         else                  { b.textContent='Gratuit'; b.className='badge free'; }
+
+        // Bannière d'invitation (owner seulement)
+        if (me.isOwner && me.inviteLink) {
+            const banner = document.getElementById('inviteBanner');
+            banner.style.display = 'flex';
+            document.getElementById('inviteLinkText').textContent = me.inviteLink;
+            document.getElementById('inviteLinkBtn').href = me.inviteLink;
+        }
 
         document.getElementById('dateStr').textContent =
             new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
@@ -873,6 +902,11 @@ async function lgGenerate() {
         document.getElementById('lgMeta').innerHTML =
             `Serveur : <strong>${_lgGuilds.find(g=>g.id===guildId)?.name || guildId}</strong> · Canal ID : <code>${channelId}</code> · Sauvegardé ✅`;
         document.getElementById('lgResult').style.display = 'block';
+        // Afficher le JSON à copier dans Render
+        if (d.envJson) {
+            document.getElementById('lgEnvJson').textContent = d.envJson;
+            document.getElementById('lgEnvHint').style.display = 'block';
+        }
         toast('Lien généré et sauvegardé !', 'ok');
     } catch(e) { toast('Erreur', 'err'); }
 }
@@ -1034,6 +1068,11 @@ async function showGuildDetail(guildId) {
     } catch(e) {
         document.getElementById('gModalBody').innerHTML = `<div style="color:var(--err);text-align:center;padding:30px">${e.message}</div>`;
     }
+}
+
+function copyInviteLink() {
+    const link = document.getElementById('inviteLinkText').textContent;
+    navigator.clipboard.writeText(link).then(() => toast('Lien d\'invitation copié !', 'ok'));
 }
 
 async function setGuildChannel(guildId, remove = false) {

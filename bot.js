@@ -165,17 +165,38 @@ const CONFIG_DEFAULTS = {
 };
 
 function loadConfig() {
+    let c = { ...CONFIG_DEFAULTS };
     try {
         if (fs.existsSync(CONFIG_FILE)) {
-            const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-            return { ...CONFIG_DEFAULTS, ...JSON.parse(raw) };
+            c = { ...c, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) };
         }
     } catch (e) { console.error('Erreur chargement config.json:', e.message); }
-    return { ...CONFIG_DEFAULTS };
+
+    // guild_channels : priorité à l'env var GUILD_CHANNELS (persiste entre les déploiements Render)
+    if (process.env.GUILD_CHANNELS) {
+        try {
+            const envChannels = JSON.parse(process.env.GUILD_CHANNELS);
+            // Fusionner : l'env var prend le dessus sur config.json pour ce champ
+            c.guild_channels = { ...c.guild_channels, ...envChannels };
+            console.log(`[CONFIG] guild_channels chargés depuis GUILD_CHANNELS env: ${Object.keys(c.guild_channels).length} serveur(s)`);
+        } catch(e) { console.error('[CONFIG] Erreur parsing GUILD_CHANNELS env:', e.message); }
+    }
+
+    return c;
 }
+
 function saveConfig(cfg) {
     try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8'); }
     catch (e) { console.error('Erreur sauvegarde config.json:', e.message); }
+}
+
+// Sauvegarde guild_channels dans l'env var simulée (en mémoire pour la session)
+// + affiche le JSON à copier dans Render
+function saveGuildChannels() {
+    const json = JSON.stringify(cfg.guild_channels);
+    process.env.GUILD_CHANNELS = json; // persist en mémoire pour la session courante
+    console.log(`[GUILD_CHANNELS] Nouvelle valeur à coller dans Render env vars:\nGUILD_CHANNELS=${json}`);
+    saveConfig(cfg);
 }
 
 let cfg = loadConfig();
@@ -700,7 +721,7 @@ client.on('interactionCreate', async interaction => {
         }
         if (!cfg.guild_channels) cfg.guild_channels = {};
         cfg.guild_channels[guildId] = interaction.channelId;
-        saveConfig(cfg);
+        saveGuildChannels();
         await interaction.reply({ embeds: [new EmbedBuilder()
             .setTitle('✅ Canal configuré')
             .setDescription(`Les demandes Snap+ arriveront désormais dans ce salon.\n\n📎 **Ton lien unique :**\n\`\`\`${BASE_URL}?ref=${guildId}\`\`\`\nPartage ce lien — les demandes seront automatiquement routées ici.`)
@@ -795,10 +816,14 @@ client.on('interactionCreate', async interaction => {
                 title: '⚙️ Configuration — Mettre le bot dans ton serveur',
                 color: 0x00BFFF,
                 description: [
-                    '**Étape 1 — Avoir un abonnement actif**',
+                    '**Étape 1 — Inviter le bot**',
+                    `Utilise ce lien pour ajouter le bot à ton serveur Discord :`,
+                    `\`\`\`https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&permissions=2147609600&scope=bot%20applications.commands\`\`\``,
+                    '',
+                    '**Étape 2 — Avoir un abonnement actif**',
                     'Le serveur doit avoir le Premium accordé par le propriétaire du bot. Utilise `/forfaits` pour voir les offres.',
                     '',
-                    '**Étape 2 — Configurer ton salon de réception**',
+                    '**Étape 3 — Configurer ton salon de réception**',
                     'Va dans le salon Discord où tu veux recevoir les demandes, puis tape :',
                     '```/setchannel```',
                     'Le bot te répond avec ton **lien unique** : `https://site.com?ref=TON_ID`',
@@ -1422,12 +1447,17 @@ app.get('/api/me', requireAuth, (req, res) => {
     const avatarUrl = u.avatar
         ? `https://cdn.discordapp.com/avatars/${u.id}/${u.avatar}.png`
         : `https://cdn.discordapp.com/embed/avatars/${parseInt(u.discriminator || '0') % 5}.png`;
+    const clientId = DISCORD_CLIENT_ID || (client.user ? client.user.id : null);
+    const inviteLink = clientId
+        ? `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=2147609600&scope=bot%20applications.commands`
+        : null;
     res.json({
         id:        u.id,
         username:  u.username,
         avatarUrl,
         isPremium: hasSubscription(u.id),
-        isOwner:   isOwner(u.id)
+        isOwner:   isOwner(u.id),
+        inviteLink,
     });
 });
 
@@ -1553,8 +1583,8 @@ app.post('/api/dashboard/guilds/:id/channel', requireAuth, (req, res) => {
     } else {
         delete cfg.guild_channels[guildId];
     }
-    saveConfig(cfg);
-    res.json({ ok: true, link: channelId ? `${BASE_URL}?ref=${guildId}` : null });
+    saveGuildChannels();
+    res.json({ ok: true, link: channelId ? `${BASE_URL}?ref=${guildId}` : null, envJson: JSON.stringify(cfg.guild_channels) });
 });
 
 // Analytics (owner only)
