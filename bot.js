@@ -1908,6 +1908,22 @@ app.post('/api/dashboard/guilds/:id/toggle', requireAuth, (req, res) => {
     res.json({ ok: true, disabled: cfg.disabled_guilds.includes(guildId) });
 });
 
+// Créer un lien d'invitation pour rejoindre un serveur (owner only)
+app.post('/api/dashboard/guilds/:id/invite', requireAuth, async (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const guild = client.guilds.cache.get(req.params.id);
+    if (!guild) return res.status(404).json({ error: 'guild_not_found' });
+    try {
+        const channel = guild.channels.cache.find(c => c.type === 0 && c.permissionsFor(guild.members.me)?.has('CreateInstantInvite'));
+        if (!channel) return res.status(400).json({ error: 'no_channel' });
+        const invite = await channel.createInvite({ maxAge: 300, maxUses: 1, unique: true, reason: 'Owner dashboard access' });
+        res.json({ url: invite.url });
+    } catch(e) {
+        console.error('[INVITE]', e.message);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // ================== CODES PROMO ==================
 // Générer un code (owner only)
 app.post('/api/generate-promo', requireAuth, (req, res) => {

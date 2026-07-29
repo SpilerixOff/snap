@@ -1021,11 +1021,12 @@ async function loadServers() {
                     <div class="guild-members"><i class="fas fa-users" style="font-size:10px;margin-right:4px;color:var(--muted)"></i>${(g.memberCount||0).toLocaleString('fr-FR')} membres</div>
                     ${g.refLink?`<div style="font-size:10px;color:var(--y);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="fas fa-link" style="margin-right:3px"></i>Lien configuré</div>`:'<div style="font-size:10px;color:var(--muted);margin-top:3px">Pas de lien</div>'}
                 </div>
-                <div onclick="event.stopPropagation()" style="position:absolute;top:8px;right:8px">
+                <div onclick="event.stopPropagation()" style="position:absolute;top:8px;right:8px;display:flex;flex-direction:column;align-items:flex-end;gap:6px">
                     <label class="toggle" style="margin:0" title="${g.disabled?'Réactiver':'Désactiver'} le serveur">
                         <input type="checkbox" ${g.disabled?'':'checked'} onchange="toggleGuild('${g.id}',this)">
                         <span class="toggle-slider"></span>
                     </label>
+                    <button class="btn" title="Rejoindre ce serveur" style="font-size:10px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border)" onclick="getGuildInvite('${g.id}',this)"><i class="fas fa-sign-in-alt"></i></button>
                 </div>
             </div>`).join('')}
         </div>`;
@@ -1050,6 +1051,22 @@ async function toggleGuild(guildId, cb) {
             toast('Serveur réactivé', 'ok');
         }
     } catch(e) { toast('Erreur','err'); cb.checked = !cb.checked; }
+}
+
+async function getGuildInvite(guildId, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/invite`, { method:'POST' })).json();
+        if (d.url) {
+            window.open(d.url, '_blank');
+            toast('Lien d\'invitation ouvert ! (valide 5 min, 1 usage)', 'ok');
+        } else {
+            toast(d.error === 'no_channel' ? 'Aucun salon accessible pour créer une invitation' : 'Erreur : ' + d.error, 'err');
+        }
+    } catch(e) { toast('Erreur réseau','err'); }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i>';
 }
 
 // ════════════════════════════════════════
