@@ -67,13 +67,21 @@ async function getDB() {
     if (!process.env.MONGODB_URI) return null;
     try {
         if (!_mongoClient) {
-            _mongoClient = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+            _mongoClient = new MongoClient(process.env.MONGODB_URI, {
+                serverSelectionTimeoutMS: 8000,
+                connectTimeoutMS: 8000,
+                tls: true,
+                tlsAllowInvalidCertificates: false,
+                tlsAllowInvalidHostnames: false,
+            });
             await _mongoClient.connect();
         }
         _db = _mongoClient.db('snapbot');
+        console.log('[DB] ✅ MongoDB connecté');
         return _db;
     } catch(e) {
-        console.error('[DB] Connexion échouée:', e.message);
+        console.error('[DB] ❌ Connexion échouée:', e.message);
+        _mongoClient = null;
         return null;
     }
 }
@@ -98,7 +106,7 @@ async function dbSet(key, value) {
 // Synchronise toutes les données depuis MongoDB au démarrage
 async function syncFromMongoDB() {
     const d = await getDB();
-    if (!d) { console.log('[DB] Pas de MONGODB_URI — utilisation des fichiers/env vars'); return; }
+    if (!d) { console.log('[DB] MongoDB indisponible — utilisation des fichiers/env vars en fallback'); return; }
     try {
         const docs = await d.collection('store').find({ _id: { $in: ['subs','promos','history','blacklist','stats','config'] } }).toArray();
         const map = Object.fromEntries(docs.map(doc => [doc._id, doc.value]));
