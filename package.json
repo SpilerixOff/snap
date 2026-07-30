@@ -3,6 +3,9 @@
   "version": "2.0.0",
   "description": "Serveur Express + Bot Discord avec boutons d'approbation",
   "main": "bot.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "start": "node bot.js"
   },
