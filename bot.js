@@ -57,6 +57,77 @@ const pendingMessages = []; // File d'attente si bot pas encore prêt
 const OWNER_ID = '1066379595881914449';
 function isOwner(userId) { return userId === OWNER_ID; }
 
+// ================== MONGODB STORAGE ==================
+const { MongoClient } = require('mongodb');
+let _mongoClient = null;
+let _db = null;
+
+async function getDB() {
+    if (_db) return _db;
+    if (!process.env.MONGODB_URI) return null;
+    try {
+        if (!_mongoClient) {
+            _mongoClient = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+            await _mongoClient.connect();
+        }
+        _db = _mongoClient.db('snapbot');
+        return _db;
+    } catch(e) {
+        console.error('[DB] Connexion échouée:', e.message);
+        return null;
+    }
+}
+
+async function dbGet(key) {
+    try {
+        const d = await getDB();
+        if (!d) return null;
+        const doc = await d.collection('store').findOne({ _id: key });
+        return doc ? doc.value : null;
+    } catch(e) { console.error(`[DB] dbGet(${key}):`, e.message); return null; }
+}
+
+async function dbSet(key, value) {
+    try {
+        const d = await getDB();
+        if (!d) return;
+        await d.collection('store').replaceOne({ _id: key }, { _id: key, value, updatedAt: new Date() }, { upsert: true });
+    } catch(e) { console.error(`[DB] dbSet(${key}):`, e.message); }
+}
+
+// Synchronise toutes les données depuis MongoDB au démarrage
+async function syncFromMongoDB() {
+    const d = await getDB();
+    if (!d) { console.log('[DB] Pas de MONGODB_URI — utilisation des fichiers/env vars'); return; }
+    try {
+        const docs = await d.collection('store').find({ _id: { $in: ['subs','promos','history','blacklist','stats','config'] } }).toArray();
+        const map = Object.fromEntries(docs.map(doc => [doc._id, doc.value]));
+
+        if (map.subs)      { subs     = map.subs;      console.log(`[DB] subs: ${Object.keys(subs).length} utilisateur(s)`); }
+        if (map.promos)    { promos   = map.promos;    console.log(`[DB] promos: ${Object.keys(promos).length} code(s)`); }
+        if (map.history)   { history  = map.history;   console.log(`[DB] history: ${history.length} entrée(s)`); }
+        if (map.blacklist) { blacklist = new Set(map.blacklist); console.log(`[DB] blacklist: ${blacklist.size} IP(s)`); }
+        if (map.stats)     {
+            statsToday = map.stats.today || statsToday;
+            statsTotal = map.stats.total || statsTotal;
+            console.log(`[DB] stats: ${statsToday.total} demandes aujourd'hui`);
+        }
+        if (map.config) {
+            const c = map.config;
+            if (c.guild_channels)     cfg.guild_channels     = { ...cfg.guild_channels, ...c.guild_channels };
+            if (c.guild_premiums)     cfg.guild_premiums     = { ...cfg.guild_premiums, ...c.guild_premiums };
+            if (c.disabled_guilds)    cfg.disabled_guilds    = c.disabled_guilds;
+            if (c.guild_notifications)cfg.guild_notifications= c.guild_notifications;
+            if (c.guild_owners)       cfg.guild_owners       = { ...cfg.guild_owners, ...c.guild_owners };
+            // Paramètres du site
+            const siteKeys = ['site_actif','ratelimit_actif','ratelimit_minutes','afficher_ip','afficher_appareil','salon_prioritaire','delai_discord_sec','timeout_minutes','webhook_fallback','bloquer_vpn','dm_notifs'];
+            for (const k of siteKeys) if (k in c) cfg[k] = c[k];
+            console.log(`[DB] config: ${Object.keys(c.guild_channels||{}).length} guild(s)`);
+        }
+        console.log('[DB] ✅ Synchronisation MongoDB terminée');
+    } catch(e) { console.error('[DB] Erreur sync:', e.message); }
+}
+
 // ================== RENDER ENV VARS PERSISTENCE ==================
 const https = require('https');
 const httpsRequest = (options, body = null) => new Promise((resolve, reject) => {
@@ -116,7 +187,7 @@ function loadPromos() {
 }
 function savePromos(data) {
     try { fs.writeFileSync(PROMOS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch(e) {}
-    updateRenderEnvVars({ PROMOS_DATA: JSON.stringify(data) }).catch(() => {});
+    dbSet('promos', data).catch(() => {});
 }
 let promos = loadPromos();
 
@@ -132,7 +203,7 @@ function loadSubs() {
 }
 function saveSubs(data) {
     try { fs.writeFileSync(SUBS_FILE, JSON.stringify(data, null, 2), 'utf8'); } catch (e) {}
-    updateRenderEnvVars({ SUBS_DATA: JSON.stringify(data) }).catch(() => {});
+    dbSet('subs', data).catch(() => {});
 }
 let subs = loadSubs();
 
@@ -291,19 +362,22 @@ function saveConfig(cfg) {
     catch (e) { console.error('Erreur sauvegarde config.json:', e.message); }
 }
 
-// Sauvegarde guild_channels + met à jour l'env var Render automatiquement
+// Sauvegarde toute la config (MongoDB + Render env var fallback)
 async function saveGuildChannels() {
     saveConfig(cfg);
+    // MongoDB — source de vérité
+    dbSet('config', cfg).catch(() => {});
+    // Render env var — fallback si MongoDB indisponible
     const configData = JSON.stringify({
         guild_premiums: cfg.guild_premiums || {},
         disabled_guilds: cfg.disabled_guilds || [],
         guild_notifications: cfg.guild_notifications || [],
         guild_owners: cfg.guild_owners || {},
     });
-    await updateRenderEnvVars({
+    updateRenderEnvVars({
         GUILD_CHANNELS: JSON.stringify(cfg.guild_channels),
         CONFIG_DATA: configData,
-    }).catch(e => console.error('[saveGuildChannels] Render err:', e.message));
+    }).catch(() => {});
 }
 
 let cfg = loadConfig();
@@ -347,7 +421,7 @@ function loadHistory() {
 }
 function saveHistory(arr) {
     try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(arr, null, 2), 'utf8'); } catch (e) {}
-    updateRenderEnvVars({ HISTORY_DATA: JSON.stringify(arr) }).catch(() => {});
+    dbSet('history', arr).catch(() => {});
 }
 let history = loadHistory();
 function pushHistory(entry) {
@@ -367,7 +441,7 @@ function loadBlacklist() {
 }
 function saveBlacklist(set) {
     try { fs.writeFileSync(BLACKLIST_FILE, JSON.stringify([...set], null, 2), 'utf8'); } catch (e) {}
-    updateRenderEnvVars({ BLACKLIST_DATA: JSON.stringify([...set]) }).catch(() => {});
+    dbSet('blacklist', [...set]).catch(() => {});
 }
 let blacklist = loadBlacklist();
 
@@ -457,7 +531,7 @@ function loadStats() {
 
 function saveStats() {
     try { fs.writeFileSync(STATS_FILE, JSON.stringify({ today: statsToday, total: statsTotal }, null, 2), 'utf8'); } catch(e) {}
-    updateRenderEnvVars({ STATS_DATA: JSON.stringify({ today: statsToday, total: statsTotal }) }).catch(() => {});
+    dbSet('stats', { today: statsToday, total: statsTotal }).catch(() => {});
 }
 
 const _stats = loadStats();
@@ -2265,6 +2339,10 @@ async function updateStatusEmbed() {
 // --- Démarrage ---
 client.once('ready', async () => {
     console.log(`🤖 Bot Discord connecté en tant que ${client.user.tag}`);
+
+    // Sync MongoDB avant tout le reste
+    await syncFromMongoDB();
+
     botReady = true;
 
     // Enregistrer les slash commands
