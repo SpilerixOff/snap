@@ -68,11 +68,8 @@ async function getDB() {
     try {
         if (!_mongoClient) {
             _mongoClient = new MongoClient(process.env.MONGODB_URI, {
-                serverSelectionTimeoutMS: 8000,
-                connectTimeoutMS: 8000,
-                tls: true,
-                tlsAllowInvalidCertificates: false,
-                tlsAllowInvalidHostnames: false,
+                serverSelectionTimeoutMS: 10000,
+                connectTimeoutMS: 10000,
             });
             await _mongoClient.connect();
         }
