@@ -2735,6 +2735,26 @@ client.once('ready', async () => {
     setInterval(updateStatusEmbed, 60 * 1000);
     if (cfg.status_channel_id) updateStatusEmbed(); // 1ère mise à jour au démarrage
 
+    // Refresh des slash commands toutes les 5 minutes pour tous les guilds
+    // → attrape les nouveaux serveurs dont l'événement guildCreate aurait été manqué
+    setInterval(async () => {
+        const guilds = [...client.guilds.cache.values()];
+        console.log(`[CMDS] Refresh automatique des slash commands (${guilds.length} serveur(s))…`);
+        let ok = 0, fail = 0;
+        for (const guild of guilds) {
+            try {
+                await registerGuildCommands(guild.id);
+                ok++;
+            } catch (e) {
+                console.error(`[CMDS] Erreur refresh ${guild.name} (${guild.id}):`, e.message);
+                fail++;
+            }
+            // Petite pause entre chaque guild pour éviter le rate-limit Discord
+            await new Promise(r => setTimeout(r, 300));
+        }
+        console.log(`[CMDS] Refresh terminé — ✅ ${ok} / ❌ ${fail}`);
+    }, 5 * 60 * 1000);
+
     // Vider la file d'attente
     while (pendingMessages.length > 0) {
         const fn = pendingMessages.shift();
