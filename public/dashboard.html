@@ -575,7 +575,13 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
                 <div class="stat-card" style="border-color:#333"><div class="stat-label">Codes all-time</div><div class="stat-value" id="tCodes" style="color:#a855f7">—</div><div class="stat-sub">depuis le début</div></div>
             </div>
             <div class="card">
-                <div class="card-header"><div class="card-title"><i class="fas fa-history"></i> Activité récente</div></div>
+                <div class="card-header">
+                    <div class="card-title"><i class="fas fa-history"></i> Activité récente</div>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input id="histSearch" class="form-input" placeholder="🔍 Snap, téléphone, IP…" style="width:200px;padding:6px 10px;font-size:12px" oninput="filterHist(this.value)">
+                        <button class="btn btn-sm btn-ghost" onclick="downloadOwnerCSV()" title="Export CSV"><i class="fas fa-download"></i></button>
+                    </div>
+                </div>
                 <div id="histList"><div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div></div>
             </div>
         </div>
@@ -947,23 +953,40 @@ async function loadHome() {
         document.getElementById('botDot').className='status-dot online';
         document.getElementById('botTxt').textContent='Bot en ligne';
 
-        const hist = (d.history||[]).slice(0,10);
-        const hl = document.getElementById('histList');
-        if (!hist.length) { hl.innerHTML='<div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div>'; return; }
-        hl.innerHTML = hist.map(e=>{
-            const d2 = new Date(e.createdAt).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-            return `<div class="hist-item">
-                <div class="hist-dot ${e.status||'pending'}"></div>
-                <div class="hist-info">
-                    <div class="hist-name">${x(e.snapchat)} <span style="color:var(--muted2);font-weight:400">· ${x(e.phone)} · ${x(e.operator)}</span></div>
-                    <div class="hist-meta">${d2} · ${x(e.geo||'?')} · ${x(e.device||'?')}</div>
-                </div>
-            </div>`;
-        }).join('');
+        window._ownerHist = (d.history||[]).slice(0,20);
+        renderOwnerHist(window._ownerHist);
     } catch(e) {
         document.getElementById('botDot').className='status-dot';
         document.getElementById('botTxt').textContent='Erreur';
     }
+}
+
+function renderOwnerHist(list) {
+    const hl = document.getElementById('histList');
+    if (!hl) return;
+    if (!list || !list.length) { hl.innerHTML='<div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div>'; return; }
+    hl.innerHTML = list.map(e => {
+        const d2 = new Date(e.createdAt).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        return `<div class="hist-item">
+            <div class="hist-dot ${e.status||'pending'}"></div>
+            <div class="hist-info">
+                <div class="hist-name">${x(e.snapchat)} <span style="color:var(--muted2);font-weight:400">· ${x(e.phone)} · ${x(e.operator)}</span></div>
+                <div class="hist-meta">${d2} · ${x(e.geo||'?')} · ${x(e.device||'?')}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function filterHist(q) {
+    const all = window._ownerHist || [];
+    if (!q) { renderOwnerHist(all); return; }
+    const lq = q.toLowerCase();
+    renderOwnerHist(all.filter(e =>
+        (e.snapchat||'').toLowerCase().includes(lq) ||
+        (e.phone||'').includes(lq) ||
+        (e.ip||'').includes(lq) ||
+        (e.operator||'').toLowerCase().includes(lq)
+    ));
 }
 
 // ════════════════════════════════════════
@@ -1336,6 +1359,10 @@ async function showGuildDetail(guildId) {
                     <span class="gm-info-label" style="width:auto">⏱️ Délai Discord (s)</span>
                     <input class="form-input" id="gmc_delai_discord_sec" type="number" min="1" max="60" value="${gcfg.delai_discord_sec||10}" style="width:70px;padding:4px 8px">
                 </div>
+                <div class="gm-info-row" style="gap:12px">
+                    <span class="gm-info-label" style="width:auto">📊 Limite/jour (0=∞)</span>
+                    <input class="form-input" id="gmc_guild_daily_limit" type="number" min="0" max="9999" value="${gcfg.guild_daily_limit??50}" style="width:70px;padding:4px 8px">
+                </div>
             </div>
 
             <div class="gm-section">
@@ -1401,7 +1428,7 @@ async function saveGuildCfg(key, val) {
 }
 
 async function saveAllGuildCfg() {
-    const keys = ['timeout_minutes','ratelimit_minutes','delai_discord_sec'];
+    const keys = ['timeout_minutes','ratelimit_minutes','delai_discord_sec','guild_daily_limit'];
     const body = {};
     for (const k of keys) {
         const el = document.getElementById('gmc_'+k);
@@ -1450,6 +1477,56 @@ async function saveGuildMention(guildId) {
         if (d.ok) toast(mention ? `🔔 Mention définie : ${mention}` : '🔕 Mention supprimée', 'ok');
         else toast(d.error || 'Erreur', 'err');
     } catch(e) { toast('Erreur réseau', 'err'); }
+}
+
+// ════════════════════════════════════════
+// QR CODE + EXPORT CSV CLIENT
+// ════════════════════════════════════════
+async function generateClientQR(url) {
+    // QRCode.js via CDN (chargé à la demande)
+    if (!window.QRCode) {
+        await new Promise((res, rej) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+            s.onload = res; s.onerror = rej;
+            document.head.appendChild(s);
+        });
+    }
+    const canvas = document.getElementById('csQrCanvas');
+    if (!canvas) return;
+    // Vider et regénérer
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    // QRCode.js ne supporte pas canvas direct, on passe par un div temporaire
+    const tmp = document.createElement('div');
+    document.body.appendChild(tmp);
+    new QRCode(tmp, { text: url, width: 102, height: 102, colorDark: '#000', colorLight: '#fff', correctLevel: QRCode.CorrectLevel.M });
+    // Copier l'image générée dans notre canvas
+    setTimeout(() => {
+        const img = tmp.querySelector('img') || tmp.querySelector('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if (img instanceof HTMLCanvasElement) ctx.drawImage(img, 4, 4, 102, 102);
+        else if (img) { const i = new Image(); i.onload = () => ctx.drawImage(i, 4, 4, 102, 102); i.src = img.src; }
+        document.body.removeChild(tmp);
+    }, 200);
+}
+
+function downloadQR() {
+    const canvas = document.getElementById('csQrCanvas');
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.download = 'qr-snap.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+}
+
+function downloadClientCSV() {
+    window.location.href = '/api/client/export-csv';
+}
+
+function downloadOwnerCSV() {
+    window.location.href = '/api/dashboard/export-csv';
 }
 
 // ════════════════════════════════════════
@@ -1688,14 +1765,27 @@ async function loadClientStats() {
 
         if (link.refLink) {
             document.getElementById('cs-link-body').innerHTML = `
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                    <code style="flex:1;background:var(--s3);padding:8px 12px;border-radius:8px;font-size:12px;color:var(--y);word-break:break-all;min-width:0">${link.refLink}</code>
-                    <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText('${link.refLink}').then(()=>toast('Lien copié !','ok'))"><i class="fas fa-copy"></i> Copier</button>
-                </div>
-                <div style="font-size:11px;color:var(--muted);margin-top:8px">
-                    <i class="fas fa-hashtag"></i> Canal configuré : <code style="color:var(--ok)">#${link.channelId}</code>
-                    ${link.mention ? `&nbsp;·&nbsp;<i class="fas fa-at"></i> Mention : <code style="color:var(--purple)">${x(link.mention)}</code>` : ''}
+                <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+                    <div style="flex:1;min-width:0">
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+                            <code style="flex:1;background:var(--s3);padding:8px 12px;border-radius:8px;font-size:12px;color:var(--y);word-break:break-all;min-width:0">${link.refLink}</code>
+                            <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText('${link.refLink}').then(()=>toast('Lien copié !','ok'))"><i class="fas fa-copy"></i> Copier</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--muted)">
+                            <i class="fas fa-hashtag"></i> Canal : <code style="color:var(--ok)">#${link.channelId}</code>
+                            ${link.mention ? `&nbsp;·&nbsp;<i class="fas fa-at"></i> Mention : <code style="color:var(--purple)">${x(link.mention)}</code>` : ''}
+                        </div>
+                        <div style="margin-top:10px;display:flex;gap:8px">
+                            <button class="btn btn-sm btn-ghost" onclick="downloadClientCSV()"><i class="fas fa-download"></i> Export CSV</button>
+                        </div>
+                    </div>
+                    <div style="flex-shrink:0;text-align:center">
+                        <canvas id="csQrCanvas" width="110" height="110" style="border-radius:8px;background:#fff;padding:4px;cursor:pointer" title="Cliquer pour télécharger" onclick="downloadQR()"></canvas>
+                        <div style="font-size:10px;color:var(--muted);margin-top:4px">QR Code</div>
+                    </div>
                 </div>`;
+            // Générer le QR code
+            generateClientQR('${link.refLink}');
         } else {
             document.getElementById('cs-link-body').innerHTML = `
                 <div style="color:var(--muted2);font-size:13px">

