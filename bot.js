@@ -1433,6 +1433,22 @@ client.on('interactionCreate', async interaction => {
     }
 
     // /forfaits — tout le monde (pas de limite, c'est une pub)
+    // /news — Changelog public (owner seulement pour poster)
+    if (interaction.commandName === 'news') {
+        if (!isOwner(interaction.user.id)) {
+            // Clients & public : version lecture seule éphémère
+            return interaction.reply({
+                embeds: [buildNewsEmbeds()[0], buildNewsEmbeds()[1]],
+                ephemeral: true
+            });
+        }
+        // Owner : poste dans le salon, visible par tous
+        await interaction.deferReply({ ephemeral: true });
+        const embeds = buildNewsEmbeds();
+        await interaction.channel.send({ embeds });
+        return interaction.editReply({ content: '✅ News postées dans ce salon !' });
+    }
+
     if (interaction.commandName === 'forfaits') {
         const PAYPAL_LINK = 'https://paypal.me/TON_PAYPAL'; // ← remplace par ton lien PayPal
 
@@ -2529,6 +2545,101 @@ async function updateStatusEmbed() {
     }
 }
 
+// ================== CHANGELOG NEWS ==================
+// Modifie ce bloc pour mettre à jour les nouveautés affichées par /news
+const NEWS_VERSION = '2.5';
+const NEWS_DATE    = '30 juillet 2026';
+const CHANGELOG = [
+    {
+        emoji: '🆕',
+        title: 'Dernières nouveautés',
+        color: 0xFFFC00,
+        items: [
+            '**Bouton Blacklister** dans Discord — blacklist l\'IP directement depuis l\'embed',
+            '**Bouton Copier le numéro** — affiche le numéro en éphémère en 1 clic',
+            '**CAPTCHA anti-bot** — question mathématique sur le formulaire d\'inscription',
+            '**Timer countdown** sur la page d\'attente — décompte visible jusqu\'à expiration',
+            '**Détection doublon Snapchat** — même pseudo bloqué pendant 24h',
+            '**Limite quotidienne** par serveur — configurable (50/jour par défaut)',
+            '**Refresh automatique** des commandes / toutes les 5 minutes',
+        ],
+    },
+    {
+        emoji: '💎',
+        title: 'Fonctionnalités Premium',
+        color: 0xa78bfa,
+        items: [
+            '**Dashboard web** complet avec stats, analytics et historique',
+            '**Export CSV** de l\'historique complet en un clic',
+            '**Recherche** dans l\'historique — filtre par snap, téléphone ou IP',
+            '**Heatmap horaire** et graphe 7 jours dans les analytics',
+            '**Codes promo** — génération et gestion via le dashboard',
+            '**Broadcast** — envoyer une annonce à tous les serveurs clients',
+        ],
+    },
+    {
+        emoji: '🤖',
+        title: 'Fonctionnalités Bot',
+        color: 0x00e676,
+        items: [
+            '**Canal dédié** — `/setchannel` pour router les demandes dans ton salon',
+            '**Mention configurable** — @here, @everyone ou @user personnalisé par serveur',
+            '**Stats de ton serveur** — `/stats` affiche tes chiffres filtrés',
+            '**QR code** du lien de partage — généré dans ton dashboard',
+            '**Dashboard client** simplifié — accès à tes stats et ton lien uniquement',
+            '**DM d\'expiration** — rappel 3 jours avant la fin de ton abonnement',
+        ],
+    },
+    {
+        emoji: '🛡️',
+        title: 'Sécurité & Stabilité',
+        color: 0xf97316,
+        items: [
+            '**Stockage MongoDB** — données persistantes même après redémarrage / redéploiement',
+            '**Session persistante** — connexion au dashboard conservée indéfiniment',
+            '**Détection VPN/proxy** — bloquer automatiquement les accès anonymisés',
+            '**Rate limiting** configurable par IP et par serveur',
+            '**Blacklist IP** — blocage permanent en 1 clic depuis Discord',
+            '**Auto-reject** — demandes expirées rejetées automatiquement après timeout',
+        ],
+    },
+];
+
+function buildNewsEmbeds() {
+    const header = new EmbedBuilder()
+        .setColor(0xFFFC00)
+        .setAuthor({ name: 'Snap+ Bot', iconURL: 'https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png' })
+        .setTitle(`📰  Nouveautés — Version ${NEWS_VERSION}`)
+        .setDescription(
+            `> Voici toutes les dernières mises à jour du bot **Snap+**.\n> Mise à jour le **${NEWS_DATE}**.`
+        )
+        .setThumbnail('https://upload.wikimedia.org/wikipedia/en/c/c4/Snapchat_logo.png')
+        .setFooter({ text: `Snap+ Bot v${NEWS_VERSION} • Toutes les fonctionnalités sont disponibles selon ton forfait.` })
+        .setTimestamp();
+
+    const sections = CHANGELOG.map(section =>
+        new EmbedBuilder()
+            .setColor(section.color)
+            .setTitle(`${section.emoji}  ${section.title}`)
+            .setDescription(section.items.map(i => `▸ ${i}`).join('\n'))
+    );
+
+    // Embed CTA final
+    const cta = new EmbedBuilder()
+        .setColor(0x1a1a2e)
+        .setDescription(
+            [
+                '**📦 Forfait Bot** — 3€/mois · Canal dédié · Stats Discord · Dashboard basique',
+                '**💎 Forfait Premium** — 6€/mois · Dashboard complet · Analytics · Export · Tout inclus',
+                '',
+                `💬 Contacte-nous pour activer ton accès ou utilise \`/forfaits\` pour en savoir plus.`,
+            ].join('\n')
+        )
+        .setFooter({ text: '🔒 Accès sécurisé · Activation sous 24h · Paiement PayPal' });
+
+    return [header, ...sections, cta];
+}
+
 // --- Démarrage ---
 client.once('ready', async () => {
     console.log(`🤖 Bot Discord connecté en tant que ${client.user.tag}`);
@@ -2565,6 +2676,10 @@ client.once('ready', async () => {
                 new SlashCommandBuilder()
                     .setName('guide')
                     .setDescription('📖 Guide complet — comment utiliser le bot Snap+')
+                    .toJSON(),
+                new SlashCommandBuilder()
+                    .setName('news')
+                    .setDescription('📰 Voir les dernières nouveautés du bot Snap+')
                     .toJSON(),
         ];
 
