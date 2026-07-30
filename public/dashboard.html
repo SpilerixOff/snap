@@ -457,6 +457,7 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
     .sidebar.open { left:0; box-shadow:20px 0 60px rgba(0,0,0,0.6); }
     .mob-btn { display:block; }
     .content { padding:16px; }
+    #cs-double-col { grid-template-columns:1fr !important; }
 }
 /* Notification temps réel */
 .rt-notif { position:fixed; bottom:24px; right:24px; background:var(--card); border:1px solid var(--y); border-radius:14px; padding:14px 18px; display:flex; align-items:center; gap:12px; z-index:9999; box-shadow:0 8px 32px #0008; transform:translateY(120px); opacity:0; transition:all .4s cubic-bezier(.68,-.55,.27,1.55); max-width:320px; }
@@ -694,12 +695,40 @@ tbody tr:hover td { background:rgba(255,255,255,0.02); }
 
         <!-- CLIENT STATS -->
         <div id="s-clientstats" class="section">
-            <div class="page-title">Mes statistiques</div>
-            <div class="page-sub">Stats de ton serveur.</div>
+            <div class="page-title">Mon tableau de bord</div>
+            <div class="page-sub" id="cs-subtitle">Chargement…</div>
+
+            <!-- Lien de partage -->
+            <div class="card" id="cs-link-card" style="margin-bottom:16px;display:none">
+                <div class="card-header">
+                    <div class="card-title"><i class="fas fa-link"></i> Ton lien de partage</div>
+                    <div id="cs-bot-status" class="bot-status"><div class="status-dot" id="csBotDot"></div><span id="csBotTxt">…</span></div>
+                </div>
+                <div id="cs-link-body"></div>
+            </div>
+
+            <!-- Stats cards -->
             <div class="stats-grid" id="cs-totals"></div>
-            <div class="card" style="margin-top:16px">
+
+            <!-- En attente + activité sur 2 colonnes -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px" id="cs-double-col">
+                <div class="card" style="margin:0">
+                    <div class="card-header"><div class="card-title"><i class="fas fa-clock" style="color:#f97316"></i> En attente</div></div>
+                    <div id="cs-pending"><div class="empty"><i class="fas fa-check-circle"></i>Aucune en attente</div></div>
+                </div>
+                <div class="card" style="margin:0">
+                    <div class="card-header">
+                        <div class="card-title"><i class="fas fa-history"></i> Activité récente</div>
+                        <button class="btn btn-sm btn-ghost" onclick="loadClientStats()" title="Rafraîchir"><i class="fas fa-sync-alt"></i></button>
+                    </div>
+                    <div id="cs-history"><div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div></div>
+                </div>
+            </div>
+
+            <!-- Graphe 7j -->
+            <div class="card" style="margin-top:12px">
                 <div class="card-header"><div class="card-title"><i class="fas fa-calendar-week"></i> Demandes — 7 derniers jours</div></div>
-                <div style="padding:16px"><canvas id="chartClientDaily" height="120"></canvas></div>
+                <div style="padding:16px"><canvas id="chartClientDaily" height="100"></canvas></div>
             </div>
         </div>
 
@@ -764,6 +793,7 @@ let chartHourly = null, chartCountries = null, chartDaily = null, chartClientDai
             showRtNotif('📱 Nouvelle demande !', `${data.snapchat} · ${data.phone}`);
             if (cur === 'home') loadHome();
             if (cur === 'requests') loadRequests();
+            if (cur === 'clientstats') loadClientStats();
         });
 
         socket.on('request_update', (data) => {
@@ -771,6 +801,7 @@ let chartHourly = null, chartCountries = null, chartDaily = null, chartClientDai
             showRtNotif(`${emoji} Demande ${data.status === 'approved' ? 'acceptée' : 'refusée'}`, data.snapchat);
             if (cur === 'home') loadHome();
             if (cur === 'requests') loadRequests();
+            if (cur === 'clientstats') loadClientStats();
         });
     };
     document.head.appendChild(s);
@@ -814,7 +845,31 @@ async function init() {
             if (n) n.style.display = '';
         }
 
-        await loadHome();
+        // Clients non-owner : simplifier le menu (masquer les sections owner)
+        if (!me.isOwner) {
+            ['requests','servers','apparence','options','blacklist','promos','analytics'].forEach(s => {
+                const el = document.querySelector(`.nav-item[data-s="${s}"]`);
+                if (el) el.style.display = 'none';
+            });
+            // Masquer les titres de section qui n'ont plus rien sous eux
+            document.querySelectorAll('.s-section').forEach(el => {
+                const t = el.textContent.trim();
+                if (t === 'Configuration' || t === 'Analytics') el.style.display = 'none';
+            });
+        }
+
+        // Clients bot/premium non-owner → aller directement sur "Mes stats"
+        if ((me.isBotTier || me.isPremium) && !me.isOwner) {
+            await loadClientStats();
+            document.querySelectorAll('.section').forEach(e => e.classList.remove('active'));
+            document.getElementById('s-clientstats').classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
+            document.querySelector('.nav-item[data-s="clientstats"]')?.classList.add('active');
+            document.getElementById('topTitle').textContent = 'Mes stats';
+            cur = 'clientstats';
+        } else {
+            await loadHome();
+        }
     } catch(e) { location.href='/login'; }
 }
 
@@ -1284,6 +1339,33 @@ async function showGuildDetail(guildId) {
             </div>
 
             <div class="gm-section">
+                <div class="gm-section-title" style="display:flex;justify-content:space-between;align-items:center">
+                    🔔 Mention Discord
+                    <button class="btn btn-y" style="font-size:11px;padding:4px 12px" onclick="saveGuildMention('${g.id}')"><i class="fas fa-save"></i> Sauvegarder</button>
+                </div>
+                <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Choisir qui sera mentionné dans le salon Discord quand une nouvelle demande arrive.</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border);transition:border-color 0.15s" id="gmMentionOpt_none">
+                        <input type="radio" name="gmMention_${g.id}" value="" id="gmMentionR_none" ${!g.mention?'checked':''} style="accent-color:var(--y)">
+                        <span style="font-size:13px">🔕 Aucune mention</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border);transition:border-color 0.15s" id="gmMentionOpt_here">
+                        <input type="radio" name="gmMention_${g.id}" value="@here" id="gmMentionR_here" ${g.mention==='@here'?'checked':''} style="accent-color:var(--y)">
+                        <span style="font-size:13px">@here <span style="color:var(--muted);font-size:11px">— membres en ligne dans le salon</span></span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border);transition:border-color 0.15s" id="gmMentionOpt_everyone">
+                        <input type="radio" name="gmMention_${g.id}" value="@everyone" id="gmMentionR_everyone" ${g.mention==='@everyone'?'checked':''} style="accent-color:var(--y)">
+                        <span style="font-size:13px">@everyone <span style="color:var(--muted);font-size:11px">— tous les membres du serveur</span></span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border);transition:border-color 0.15s" id="gmMentionOpt_custom">
+                        <input type="radio" name="gmMention_${g.id}" value="custom" id="gmMentionR_custom" ${g.mention && g.mention!=='@here' && g.mention!=='@everyone'?'checked':''} style="accent-color:var(--y)">
+                        <span style="font-size:13px">Personnalisé</span>
+                    </label>
+                    <input class="form-input" id="gmMentionCustom" placeholder="@user, <@userId>, <@&roleId>…" style="margin-top:2px;font-size:12px" value="${g.mention && g.mention!=='@here' && g.mention!=='@everyone' ? x(g.mention) : ''}">
+                </div>
+            </div>
+
+            <div class="gm-section">
                 <div class="gm-section-title">Salons (${g.channels.length})</div>
                 <div class="channel-list">${chHtml}</div>
             </div>`;
@@ -1349,6 +1431,25 @@ async function toggleGuildPremium(guildId, grant) {
 function closeGuildModal(e) {
     if (e && e.target !== document.getElementById('guildModal')) return;
     document.getElementById('guildModal').classList.remove('open');
+}
+
+async function saveGuildMention(guildId) {
+    const selected = document.querySelector(`input[name="gmMention_${guildId}"]:checked`);
+    if (!selected) return toast('Sélectionne une option', 'err');
+    let mention = selected.value;
+    if (mention === 'custom') {
+        mention = (document.getElementById('gmMentionCustom')?.value || '').trim();
+        if (!mention) return toast('Entre une mention personnalisée', 'err');
+    }
+    try {
+        const d = await (await fetch(`/api/dashboard/guilds/${guildId}/mention`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mention })
+        })).json();
+        if (d.ok) toast(mention ? `🔔 Mention définie : ${mention}` : '🔕 Mention supprimée', 'ok');
+        else toast(d.error || 'Erreur', 'err');
+    } catch(e) { toast('Erreur réseau', 'err'); }
 }
 
 // ════════════════════════════════════════
@@ -1558,32 +1659,105 @@ async function loadAnalytics() {
 // CLIENT STATS
 // ════════════════════════════════════════
 async function loadClientStats() {
-    const el = document.getElementById('cs-totals');
-    el.innerHTML = '<div style="color:var(--muted)">Chargement…</div>';
+    const totalsEl  = document.getElementById('cs-totals');
+    const pendingEl = document.getElementById('cs-pending');
+    const histEl    = document.getElementById('cs-history');
+    totalsEl.innerHTML = '<div style="color:var(--muted);font-size:12px">Chargement…</div>';
+
     try {
-        const d = await (await fetch('/api/client/stats')).json();
-        if (d.error) { el.innerHTML=`<div style="color:var(--err)">${d.error}</div>`; return; }
-        const rate = d.total > 0 ? Math.round(d.approved / d.total * 100) : 0;
-        el.innerHTML = `
-            <div class="stat-card c-yellow"><div class="stat-label">Total</div><div class="stat-value">${d.total}</div><div class="stat-sub">demandes reçues</div></div>
-            <div class="stat-card c-green"><div class="stat-label">Acceptées</div><div class="stat-value">${d.approved}</div><div class="stat-sub">par l'owner</div></div>
-            <div class="stat-card c-red"><div class="stat-label">Refusées</div><div class="stat-value">${d.total - d.approved}</div><div class="stat-sub">ou expirées</div></div>
-            <div class="stat-card c-purple"><div class="stat-label">Taux accept.</div><div class="stat-value">${rate}%</div><div class="stat-sub">global</div></div>`;
+        // 3 requêtes en parallèle
+        const [stats, link, hist] = await Promise.all([
+            fetch('/api/client/stats').then(r=>r.json()),
+            fetch('/api/client/link').then(r=>r.json()),
+            fetch('/api/client/history').then(r=>r.json()),
+        ]);
+
+        if (stats.error) { totalsEl.innerHTML=`<div style="color:var(--err)">${stats.error}</div>`; return; }
+
+        // ── Sous-titre + statut bot ───────────────────────────────
+        document.getElementById('cs-subtitle').textContent =
+            link.guildName ? `Serveur : ${link.guildName}` : 'Ton serveur Discord';
+
+        // ── Lien de partage ───────────────────────────────────────
+        const linkCard = document.getElementById('cs-link-card');
+        const botDot   = document.getElementById('csBotDot');
+        const botTxt   = document.getElementById('csBotTxt');
+        linkCard.style.display = '';
+        botDot.className = 'status-dot' + (link.botOnline ? ' online' : '');
+        botTxt.textContent = link.botOnline ? 'Bot en ligne' : 'Bot hors ligne';
+
+        if (link.refLink) {
+            document.getElementById('cs-link-body').innerHTML = `
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <code style="flex:1;background:var(--s3);padding:8px 12px;border-radius:8px;font-size:12px;color:var(--y);word-break:break-all;min-width:0">${link.refLink}</code>
+                    <button class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText('${link.refLink}').then(()=>toast('Lien copié !','ok'))"><i class="fas fa-copy"></i> Copier</button>
+                </div>
+                <div style="font-size:11px;color:var(--muted);margin-top:8px">
+                    <i class="fas fa-hashtag"></i> Canal configuré : <code style="color:var(--ok)">#${link.channelId}</code>
+                    ${link.mention ? `&nbsp;·&nbsp;<i class="fas fa-at"></i> Mention : <code style="color:var(--purple)">${x(link.mention)}</code>` : ''}
+                </div>`;
+        } else {
+            document.getElementById('cs-link-body').innerHTML = `
+                <div style="color:var(--muted2);font-size:13px">
+                    <i class="fas fa-exclamation-triangle" style="color:#f97316"></i>
+                    Aucun canal configuré. Utilise <code>/setchannel</code> dans ton serveur Discord pour générer ton lien.
+                </div>`;
+        }
+
+        // ── Stat cards ────────────────────────────────────────────
+        const rate    = stats.total > 0 ? Math.round(stats.approved / stats.total * 100) : 0;
+        const lastReqStr = stats.lastReq
+            ? new Date(stats.lastReq).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+            : '—';
+        totalsEl.innerHTML = `
+            <div class="stat-card c-yellow"><div class="stat-label">Total</div><div class="stat-value">${stats.total}</div><div class="stat-sub">demandes reçues</div></div>
+            <div class="stat-card c-green"><div class="stat-label">Acceptées</div><div class="stat-value">${stats.approved}</div><div class="stat-sub">par l'owner</div></div>
+            <div class="stat-card c-red"><div class="stat-label">Refusées</div><div class="stat-value">${stats.rejected}</div><div class="stat-sub">ou expirées</div></div>
+            <div class="stat-card c-purple"><div class="stat-label">Taux accept.</div><div class="stat-value">${rate}%</div><div class="stat-sub">global</div></div>
+            <div class="stat-card c-orange"><div class="stat-label">En attente</div><div class="stat-value">${stats.pending ?? 0}</div><div class="stat-sub">maintenant</div></div>
+            <div class="stat-card" style="border-color:#333"><div class="stat-label">Dernière</div><div class="stat-value" style="font-size:14px;color:var(--muted2)">${lastReqStr}</div><div class="stat-sub">demande reçue</div></div>`;
+
+        // ── En attente ────────────────────────────────────────────
+        if (!stats.pending || stats.pending === 0) {
+            pendingEl.innerHTML = '<div class="empty"><i class="fas fa-check-circle" style="color:var(--ok)"></i>Aucune demande en attente</div>';
+        } else {
+            pendingEl.innerHTML = `<div style="padding:8px 0;text-align:center;font-size:28px;font-weight:900;color:#f97316">${stats.pending}</div><div style="text-align:center;font-size:12px;color:var(--muted);padding-bottom:12px">demande${stats.pending>1?'s':''} en attente de traitement</div>`;
+        }
+
+        // ── Activité récente ──────────────────────────────────────
+        if (!hist || !hist.length) {
+            histEl.innerHTML = '<div class="empty"><i class="fas fa-inbox"></i>Aucune activité</div>';
+        } else {
+            histEl.innerHTML = '<div style="max-height:220px;overflow-y:auto">' + hist.slice(0,15).map(e => {
+                const cls = e.status==='approved'?'approved':e.status==='rejected'?'rejected':'pending';
+                const icon = e.status==='approved'?'✅':e.status==='rejected'?'❌':'⏳';
+                const dt   = new Date(e.createdAt).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+                return `<div class="hist-item">
+                    <div class="hist-dot ${cls}"></div>
+                    <div class="hist-info">
+                        <div class="hist-name">${icon} ${x(e.snapchat||'')}</div>
+                        <div class="hist-meta">${x(e.phone||'')} · ${dt}</div>
+                    </div>
+                </div>`;
+            }).join('') + '</div>';
+        }
+
+        // ── Graphe 7j ─────────────────────────────────────────────
         if (!window.Chart) {
             await new Promise((res,rej) => { const s=document.createElement('script'); s.src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'; s.onload=res; s.onerror=rej; document.head.appendChild(s); });
         }
-        if (d.daily7 && d.daily7.length) {
+        if (stats.daily7 && stats.daily7.length) {
             if (chartClientDaily) chartClientDaily.destroy();
             chartClientDaily = new Chart(document.getElementById('chartClientDaily'), {
                 type: 'bar',
                 data: {
-                    labels: d.daily7.map(x=>x.label),
-                    datasets: [{ data: d.daily7.map(x=>x.count), backgroundColor: '#FFD600aa', borderColor: '#FFD600', borderWidth: 1, borderRadius: 4 }]
+                    labels: stats.daily7.map(x=>x.label),
+                    datasets: [{ data: stats.daily7.map(x=>x.count), backgroundColor: '#FFD600aa', borderColor: '#FFD600', borderWidth: 1, borderRadius: 4 }]
                 },
                 options: { responsive:true, plugins:{legend:{display:false}}, scales:{ x:{ticks:{color:'#888',font:{size:10}},grid:{color:'#2a2a2a'}}, y:{ticks:{color:'#888',font:{size:10}},grid:{color:'#2a2a2a'},beginAtZero:true,precision:0} } }
             });
         }
-    } catch(e) { el.innerHTML='<div style="color:var(--err)">Erreur</div>'; }
+    } catch(e) { totalsEl.innerHTML='<div style="color:var(--err)">Erreur de chargement</div>'; }
 }
 
 // CODES PROMO
@@ -1839,7 +2013,7 @@ function toggleSb(){ document.getElementById('sb').classList.toggle('open'); }
 // START
 // ════════════════════════════════════════
 init();
-setInterval(()=>{ if(cur==='home') loadHome(); if(cur==='requests') loadRequests(); }, 30000);
+setInterval(()=>{ if(cur==='home') loadHome(); if(cur==='requests') loadRequests(); if(cur==='clientstats') loadClientStats(); }, 30000);
 </script>
 
 <!-- Guild Detail Modal -->

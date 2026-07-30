@@ -124,6 +124,7 @@ async function syncFromMongoDB() {
             if (c.disabled_guilds)    cfg.disabled_guilds    = c.disabled_guilds;
             if (c.guild_notifications)cfg.guild_notifications= c.guild_notifications;
             if (c.guild_owners)       cfg.guild_owners       = { ...cfg.guild_owners, ...c.guild_owners };
+            if (c.guild_mentions)     cfg.guild_mentions     = { ...cfg.guild_mentions, ...c.guild_mentions };
             // Paramètres du site
             const siteKeys = ['site_actif','ratelimit_actif','ratelimit_minutes','afficher_ip','afficher_appareil','salon_prioritaire','delai_discord_sec','timeout_minutes','webhook_fallback','bloquer_vpn','dm_notifs'];
             for (const k of siteKeys) if (k in c) cfg[k] = c[k];
@@ -326,6 +327,7 @@ const CONFIG_DEFAULTS = {
     guild_owners:         {},   // { guildId: userId } — qui a run /setchannel
     disabled_guilds:      [],   // [guildId] — guilds bloquées par l'owner
     guild_notifications:  [],   // [{ guildId, name, icon, joinedAt, seen }] — nouveaux serveurs
+    guild_mentions:       {},   // { guildId: '@here' | '@everyone' | '<@userId>' | '' }
 
     // ---- Notifications ----
     dm_notifs:            true, // DM à l'owner à chaque approve/reject
@@ -781,7 +783,8 @@ app.post('/api/submit', async (req, res) => {
         if (refGuildId) {
             if (clientChannel) {
                 console.log(`[DISCORD] Envoi boutons → channel client ${refChannelId}`);
-                try { await clientChannel.send({ embeds: [embed], components: [row] }); }
+                const mentionStr = (cfg.guild_mentions || {})[refGuildId] || '';
+                try { await clientChannel.send({ content: mentionStr || undefined, embeds: [embed], components: [row] }); }
                 catch(e) { console.error('Erreur envoi channel client:', e.message); }
             } else {
                 console.error(`[DISCORD] Channel client ${refChannelId} introuvable — boutons perdus`);
@@ -1907,20 +1910,27 @@ app.get('/api/dashboard/stats', requireAuth, (req, res) => {
     res.json({ ...statsToday, pending, history: history.slice(0, 20), statsTotal });
 });
 
+// Helper : trouver le guildId associé à un client
+function getClientGuildId(uid) {
+    const ownerEntry = Object.entries(cfg.guild_owners || {}).find(([, v]) => v === uid);
+    if (ownerEntry) return ownerEntry[0];
+    const premiumEntry = Object.entries(cfg.guild_premiums || {}).find(([, v]) => v && v.discordId === uid);
+    if (premiumEntry) return premiumEntry[0];
+    return null;
+}
+
 // Stats client (bot tier) — stats filtrées par guild
 app.get('/api/client/stats', requireAuth, (req, res) => {
     const uid = req.session.user.id;
     if (!hasBotAccess(uid)) return res.status(403).json({ error: 'bot_required' });
-    // Trouver le guild de ce client
-    const guildId = Object.entries(cfg.guild_premiums || {}).find(([, v]) => v && v.discordId === uid)?.[0]
-        || Object.entries(cfg.guild_owners || {}).find(([, v]) => v === uid)?.[0];
+    const guildId = getClientGuildId(uid);
     resetStatsIfNewDay();
-    const clientHistory = guildId
-        ? history.filter(h => h.refGuildId === guildId)
-        : [];
+    const clientHistory = guildId ? history.filter(h => h.refGuildId === guildId) : [];
     const approved = clientHistory.filter(h => h.status === 'approved').length;
     const rejected = clientHistory.filter(h => h.status === 'rejected').length;
     const total    = clientHistory.length;
+    const pending  = [...requests.values()].filter(r => r.refGuildId === guildId && !r.approved && !r.rejected).length;
+    const lastReq  = clientHistory.length ? clientHistory[clientHistory.length - 1].createdAt : null;
     // 7 jours
     const daily7 = [];
     for (let i = 6; i >= 0; i--) {
@@ -1929,7 +1939,38 @@ app.get('/api/client/stats', requireAuth, (req, res) => {
         const start = d.getTime(); const end = start + 86400000;
         daily7.push({ label, count: clientHistory.filter(h => h.createdAt >= start && h.createdAt < end).length });
     }
-    res.json({ total, approved, rejected, daily7, guildId });
+    res.json({ total, approved, rejected, pending, lastReq, daily7, guildId });
+});
+
+// Lien & infos de canal du client
+app.get('/api/client/link', requireAuth, (req, res) => {
+    const uid = req.session.user.id;
+    if (!hasBotAccess(uid)) return res.status(403).json({ error: 'bot_required' });
+    const guildId   = getClientGuildId(uid);
+    const guild     = (botReady && guildId) ? client.guilds.cache.get(guildId) : null;
+    const channelId = guildId ? (cfg.guild_channels || {})[guildId] || null : null;
+    const mention   = guildId ? (cfg.guild_mentions || {})[guildId] || '' : '';
+    res.json({
+        guildId,
+        refLink:     channelId ? `${BASE_URL}?ref=${guildId}` : null,
+        channelId,
+        mention,
+        guildName:   guild ? guild.name : null,
+        guildIcon:   guild ? (guild.iconURL({ size: 64 }) || null) : null,
+        memberCount: guild ? guild.memberCount : null,
+        botOnline:   botReady,
+    });
+});
+
+// Historique récent du client
+app.get('/api/client/history', requireAuth, (req, res) => {
+    const uid = req.session.user.id;
+    if (!hasBotAccess(uid)) return res.status(403).json({ error: 'bot_required' });
+    const guildId = getClientGuildId(uid);
+    const clientHistory = guildId
+        ? history.filter(h => h.refGuildId === guildId).slice(-25).reverse()
+        : [];
+    res.json(clientHistory);
 });
 
 // Demandes en attente (premium)
@@ -1981,6 +2022,7 @@ app.get('/api/dashboard/guilds/:id', requireAuth, (req, res) => {
         hasPremium: hasGuildPremium(guild.id),
         channelId: (cfg.guild_channels && cfg.guild_channels[guild.id]) || null,
         refLink: (cfg.guild_channels && cfg.guild_channels[guild.id]) ? `${BASE_URL}?ref=${guild.id}` : null,
+        mention: (cfg.guild_mentions && cfg.guild_mentions[guild.id]) || '',
         createdAt: guild.createdTimestamp,
         channels
     });
@@ -2017,6 +2059,21 @@ app.post('/api/dashboard/guilds/:id/channel', requireAuth, async (req, res) => {
     }
     await saveGuildChannels();
     res.json({ ok: true, link: channelId ? `${BASE_URL}?ref=${guildId}` : null, envJson: JSON.stringify(cfg.guild_channels) });
+});
+
+// Mention Discord pour un guild (owner only)
+app.post('/api/dashboard/guilds/:id/mention', requireAuth, async (req, res) => {
+    if (!isOwner(req.session.user.id)) return res.status(403).json({ error: 'owner_only' });
+    const guildId = req.params.id;
+    const { mention } = req.body; // '@here', '@everyone', '<@userId>', ou ''
+    if (!cfg.guild_mentions) cfg.guild_mentions = {};
+    if (mention) {
+        cfg.guild_mentions[guildId] = mention.trim();
+    } else {
+        delete cfg.guild_mentions[guildId];
+    }
+    await saveGuildChannels();
+    res.json({ ok: true, mention: cfg.guild_mentions[guildId] || '' });
 });
 
 // Analytics (owner only)
